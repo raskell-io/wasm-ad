@@ -8,6 +8,7 @@
 <p align="center"><b>A fantasy handheld with Game Boy Advance–style hardware. Carts are WebAssembly.</b></p>
 
 <p align="center">
+  <a href="https://wasmad.raskell.io"><b>Play in your browser</b></a> ·
   <a href="SPEC.md">Specification</a> ·
   <a href="#writing-a-cart-in-rust">Write a cart</a> ·
   <a href="https://github.com/raskell-io/rainbow-river">Rainbow River</a>
@@ -34,6 +35,8 @@ Rust SDK.
 | Determinism | no clock, one boot seed: replays, save states and netplay come free |
 
 ## Try it
+
+Play at **[wasmad.raskell.io](https://wasmad.raskell.io)**, or locally:
 
 ```sh
 make serve       # the player: http://localhost:8643/?cart=carts/twirl.wasm
