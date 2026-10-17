@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WASM-AD Player</title>
+  <style>
+    :root { --bg: #121218; --panel: #1c1c26; --fg: #c8c8d8; --dim: #6c6c80; --accent: #8a7cff; --err: #ff6b6b; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+      font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { display: grid; grid-template-rows: auto 1fr auto; min-height: 100%; }
+    header { display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: var(--panel); flex-wrap: wrap; }
+    header h1 { font-size: 13px; margin: 0; letter-spacing: 0.08em; }
+    header h1 span { color: var(--accent); }
+    #info { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button, label.button { background: transparent; color: var(--fg); border: 1px solid #34344a; border-radius: 4px;
+      padding: 4px 10px; font: inherit; cursor: pointer; }
+    button:hover, label.button:hover { border-color: var(--accent); }
+    button:disabled { opacity: 0.4; cursor: default; }
+    main { display: grid; place-items: center; padding: 16px; }
+    #screen { image-rendering: pixelated; image-rendering: crisp-edges; display: block; background: #000; }
+    #drop { position: fixed; inset: 0; display: none; place-items: center; background: rgba(18, 18, 24, 0.85);
+      border: 2px dashed var(--accent); font-size: 16px; }
+    body.dragging #drop { display: grid; }
+    #message { position: absolute; max-width: 420px; text-align: center; color: var(--dim); }
+    #message.error { color: var(--err); }
+    footer { padding: 10px 16px; color: var(--dim); text-align: center; }
+    kbd { color: var(--fg); }
+    input[type=file] { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WASM<span>-AD</span></h1>
+    <div id="info">No cart loaded</div>
+    <label class="button">Load cart…<input id="file" type="file" accept=".wasm,application/wasm"></label>
+    <button id="reset" disabled>Reset</button>
+    <button id="export" disabled>Export save</button>
+    <label class="button" id="import-label">Import save<input id="import" type="file"></label>
+  </header>
+  <main>
+    <canvas id="screen" width="240" height="160"></canvas>
+    <div id="message">Drop a WASM-AD cart (.wasm) here, or use “Load cart…”.</div>
+  </main>
+  <footer>
+    <kbd>Arrows</kbd> D-pad · <kbd>X</kbd> A · <kbd>Z</kbd> B · <kbd>A</kbd> L · <kbd>S</kbd> R ·
+    <kbd>Enter</kbd> Start · <kbd>Shift</kbd> Select · gamepads supported
+  </footer>
+  <div id="drop">Drop cart to play</div>
+  <script type="module" src="player.js"></script>
+</body>
+</html>
