@@ -1,0 +1,11 @@
+[package]
+name = "wasm-ad"
+description = "Rust SDK for writing WASM-AD carts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+wasm-ad-core = { path = "../core", version = "0.1.0" }

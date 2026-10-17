@@ -1,0 +1,8 @@
+# WASM-AD carts must keep their data and stack out of 0x00000–0x27FFF
+# (SPEC.md §13). rustc puts the stack at address 0 unless told otherwise.
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C", "link-arg=--no-stack-first",
+    "-C", "link-arg=--global-base=163840",
+    "-C", "link-arg=-zstack-size=65536",
+]

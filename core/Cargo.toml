@@ -1,0 +1,15 @@
+[package]
+name = "wasm-ad-core"
+description = "Reference renderer for the WASM-AD fantasy console"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Exports the C ABI the web player calls. Only for building player/web/core.wasm.
+player = []
