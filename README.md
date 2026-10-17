@@ -1,7 +1,17 @@
-# WASM-AD
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="site/assets/brand/wordmark-dark.png">
+    <img src="site/assets/brand/wordmark-light.png" alt="WASM-AD" width="420">
+  </picture>
+</p>
 
-A fantasy console with Game Boy Advance–style hardware, whose cartridges are
-WebAssembly modules.
+<p align="center"><b>A fantasy handheld with Game Boy Advance–style hardware. Carts are WebAssembly.</b></p>
+
+<p align="center">
+  <a href="SPEC.md">Specification</a> ·
+  <a href="#writing-a-cart-in-rust">Write a cart</a> ·
+  <a href="https://github.com/raskell-io/rainbow-river">Rainbow River</a>
+</p>
 
 A cart is one `.wasm` file. It exports `update()`, which the console calls
 60 times a second, and draws by writing registers, palettes, tiles, maps and
@@ -26,7 +36,8 @@ Rust SDK.
 ## Try it
 
 ```sh
-make serve     # http://localhost:8643/?cart=carts/hello.wasm
+make serve       # the player: http://localhost:8643/?cart=carts/twirl.wasm
+make site-serve  # the website: http://localhost:8644/
 ```
 
 The player at `player/web` loads any cart by file picker, drag and drop, or
@@ -84,7 +95,9 @@ unit-tested with `cargo test` and frames rendered with `wasm_ad::host`. See
 SPEC.md        the standard
 core/          wasm-ad-core: reference renderer, written section by section from the spec
 sdk/           wasm-ad: Rust SDK for carts, with a native test host
-player/web/    browser player (host side of the spec)
+player/web/    browser player; wasm-ad.js is the embeddable console
+site/          the website: landing page with a playable handheld, and the spec
+carts/twirl/   a spinning-stick maze game: affine sprite, parallax, blending, save RAM
 carts/hello/   example cart: raster gradient, blending, affine sprite, mosaic
 ```
 
@@ -96,7 +109,7 @@ v0.1 covers video, input and save. Audio (four tone/noise channels and two
 PCM channels) is planned for 0.2, along with affine backgrounds (modes 1 and
 2). The spec is a draft: expect breaking changes before 1.0.
 
-WASM-AD is not affiliated with Nintendo.
+WASM-AD is not affiliated with Nintendo. Pixel art on the website was made with PixelLab.
 
 ## License
 

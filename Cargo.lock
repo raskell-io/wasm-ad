@@ -10,6 +10,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "twirl"
+version = "0.1.0"
+dependencies = [
+ "wasm-ad",
+]
+
+[[package]]
 name = "wasm-ad"
 version = "0.1.0"
 dependencies = [
