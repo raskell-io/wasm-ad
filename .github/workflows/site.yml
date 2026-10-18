@@ -1,8 +1,7 @@
 name: Site
 
-# Builds the website and uploads it to the Cloudflare Pages project
-# `wasmad-raskell-io`, which serves wasmad.raskell.io. Needs the repository secret
-# CLOUDFLARE_API_TOKEN (Cloudflare Pages: Edit).
+# Tests and builds the website. Cloudflare Pages builds and deploys it from
+# `main` with scripts/cf-pages-build.sh.
 
 on:
   push:
@@ -32,10 +31,3 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
       - run: make site RAINBOW_RIVER=rainbow-river
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: cf608a0a961c5a40f720e3dec3cc7135
-          # `pages` is the project's production branch.
-          command: pages deploy dist --project-name=wasmad-raskell-io --branch=pages --commit-dirty=true
