@@ -49,13 +49,13 @@ Shift = Select. Gamepads work too.
 
 ## Writing a cart
 
-| Language | SDK | Toolchain |
-|---|---|---|
-| Rust | [`sdk/rust`](sdk/rust), below | `rustup target add wasm32-unknown-unknown` |
-| C, C++ | [`sdk/c`](sdk/c): one header | clang with the WebAssembly backend, wasm-ld |
-| Zig | [`sdk/zig`](sdk/zig) | Zig 0.16 |
-| AssemblyScript | [`sdk/assemblyscript`](sdk/assemblyscript) | `assemblyscript` 0.28 from npm |
-| Go | [`sdk/tinygo`](sdk/tinygo) | TinyGo 0.43 |
+| Language | SDK | Get it | Toolchain |
+|---|---|---|---|
+| Rust | [`sdk/rust`](sdk/rust), below | `wasm-ad = { git = "https://github.com/raskell-io/wasm-ad" }` | `rustup target add wasm32-unknown-unknown` |
+| C, C++ | [`sdk/c`](sdk/c): one header | Copy `sdk/c/wasm_ad.h` | clang with the WebAssembly backend, wasm-ld |
+| Zig | [`sdk/zig`](sdk/zig) | Path dependency on a checkout or submodule | Zig 0.16 |
+| AssemblyScript | [`sdk/assemblyscript`](sdk/assemblyscript) | `npm install @raskell/wasm-ad` ([npm](https://www.npmjs.com/package/@raskell/wasm-ad)) | `assemblyscript` 0.28 from npm |
+| Go | [`sdk/tinygo`](sdk/tinygo) | `github.com/raskell-io/wasm-ad/sdk/tinygo@v0.1.0` | TinyGo 0.43 |
 
 Every SDK has the same starter cart, which renders bit-identical frames in
 all of them (`make sdk-test`), and the same fixed-point trigonometry, so cart

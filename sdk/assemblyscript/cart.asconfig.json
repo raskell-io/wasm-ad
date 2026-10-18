@@ -3,7 +3,7 @@
     "runtime": "stub",
     "memoryBase": 163840,
     "initialMemory": 4,
-    "use": ["abort=~lib/wasm-ad/assembly/index/abort"],
+    "use": ["abort=~lib/@raskell/wasm-ad/assembly/index/abort"],
     "optimizeLevel": 3,
     "shrinkLevel": 1,
     "noAssert": true,

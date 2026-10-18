@@ -18,12 +18,12 @@ and renders bit-identical frames. Drop `build/starter.wasm` into the player.
 ## A new cart
 
 ```sh
-npm install wasm-ad assemblyscript@0.28
-echo '{ "extends": "./node_modules/wasm-ad/cart.asconfig.json" }' > asconfig.json
+npm install @raskell/wasm-ad assemblyscript@0.28
+echo '{ "extends": "./node_modules/@raskell/wasm-ad/cart.asconfig.json" }' > asconfig.json
 ```
 
 ```ts
-import { write16, reg, dispcnt, keys, key } from "wasm-ad/assembly";
+import { write16, reg, dispcnt, keys, key } from "@raskell/wasm-ad/assembly";
 ```
 
 ```sh
