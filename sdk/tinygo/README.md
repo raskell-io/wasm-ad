@@ -46,13 +46,27 @@ func update() {
 func main() {}
 ```
 
+In your own module, require the SDK and copy its TinyGo target:
+
 ```sh
-./build.sh path/to/cart title="My Cart" author=you version=0.1.0
+go mod init example.com/mycart
+go mod edit -require=github.com/raskell-io/wasm-ad/sdk/tinygo@v0.1.0
+go mod download github.com/raskell-io/wasm-ad/sdk/tinygo
+cp "$(go list -m -f '{{.Dir}}' github.com/raskell-io/wasm-ad/sdk/tinygo)/wasm-ad.json" .
 ```
 
-`build.sh` adds the `wasm-ad` metadata section (`spec` is filled in) with
-`tools/wasmad.mjs meta`, since TinyGo cannot emit custom sections, then runs
-`wasmad check`.
+`go get` does not work here: it type-checks the package with the standard Go
+toolchain, which has no `runtime/volatile`. Build with TinyGo, then add the
+metadata section (TinyGo cannot write custom sections) from a wasm-ad checkout:
+
+```sh
+tinygo build -target wasm-ad.json -scheduler=none -panic=trap -opt=z -no-debug -o cart.wasm .
+node path/to/wasm-ad/tools/wasmad.mjs meta cart.wasm title="My Cart" author=you
+node path/to/wasm-ad/tools/wasmad.mjs check cart.wasm
+```
+
+Inside this repository, `./build.sh path/to/cart title="My Cart" author=you`
+does all three steps.
 
 ## Why the build looks like this
 

@@ -48,3 +48,16 @@ jobs:
       - run: make sdk-test
         env:
           REQUIRE_ALL: 1
+      # The steps in sdk/tinygo/README.md, against the latest released module.
+      - name: Build a cart from the released Go SDK
+        run: |
+          tag=$(git ls-remote --tags --refs origin 'sdk/tinygo/v*' | sed 's#.*refs/tags/sdk/tinygo/##' | sort -V | tail -1)
+          mkdir -p "$RUNNER_TEMP/gocart" && cp sdk/tinygo/examples/starter/main.go "$RUNNER_TEMP/gocart/"
+          cd "$RUNNER_TEMP/gocart"
+          go mod init example.com/cart
+          go mod edit -require=github.com/raskell-io/wasm-ad/sdk/tinygo@$tag
+          go mod download github.com/raskell-io/wasm-ad/sdk/tinygo
+          cp "$(go list -m -f '{{.Dir}}' github.com/raskell-io/wasm-ad/sdk/tinygo)/wasm-ad.json" .
+          tinygo build -target wasm-ad.json -scheduler=none -panic=trap -opt=z -no-debug -o cart.wasm .
+          node "$GITHUB_WORKSPACE/tools/wasmad.mjs" meta cart.wasm title=Starter
+          node "$GITHUB_WORKSPACE/tools/wasmad.mjs" check cart.wasm
