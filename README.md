@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="site/assets/brand/wordmark-dark.png">
-    <img src="site/assets/brand/wordmark-light.png" alt="WASM-AD" width="360">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/wordmark-dark.png">
+    <img src="assets/brand/wordmark-light.png" alt="WASM-AD" width="360">
   </picture>
 </p>
 
@@ -36,11 +36,11 @@ Rust SDK.
 
 ## Try it
 
-Play at **[wasmad.raskell.io](https://wasmad.raskell.io)**, or locally:
+Play at **[wasmad.raskell.io](https://wasmad.raskell.io)**
+([source](https://github.com/raskell-io/wasmad.raskell.io)), or locally:
 
 ```sh
-make serve       # the player: http://localhost:8643/?cart=carts/twirl.wasm
-make site-serve  # the website: http://localhost:8644/
+make serve  # the player: http://localhost:8643/?cart=carts/twirl.wasm
 ```
 
 The player at `player/web` loads any cart by file picker, drag and drop, or
@@ -99,7 +99,6 @@ SPEC.md        the standard
 core/          wasm-ad-core: reference renderer, written section by section from the spec
 sdk/           wasm-ad: Rust SDK for carts, with a native test host
 player/web/    browser player; wasm-ad.js is the embeddable console
-site/          the website: landing page with a playable handheld, and the spec
 carts/twirl/   a spinning-stick maze game: affine sprite, parallax, blending, save RAM
 carts/hello/   example cart: raster gradient, blending, affine sprite, mosaic
 ```
@@ -112,7 +111,7 @@ v0.1 covers video, input and save. Audio (four tone/noise channels and two
 PCM channels) is planned for 0.2, along with affine backgrounds (modes 1 and
 2). The spec is a draft: expect breaking changes before 1.0.
 
-WASM-AD is not affiliated with Nintendo. Pixel art on the website was made with PixelLab.
+WASM-AD is not affiliated with Nintendo.
 
 ## License
 
