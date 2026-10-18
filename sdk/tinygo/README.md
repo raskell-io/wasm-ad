@@ -14,6 +14,10 @@ supports Go up to 1.27), and Node 18+ for the metadata step:
 ./build.sh examples/starter        # build/starter.wasm, checked against SPEC.md
 ```
 
+The starter is the same cart as every other SDK's, with the same frames and
+sound: a rotating checkerboard on an affine background, a star you move, and
+a tune on all four sound channels.
+
 Set `TINYGO=/path/to/tinygo` if it is not on your `PATH`. Drop the `.wasm` into
 the player, or run it headlessly from the repository root:
 
@@ -50,7 +54,7 @@ In your own module, require the SDK and copy its TinyGo target:
 
 ```sh
 go mod init example.com/mycart
-go mod edit -require=github.com/raskell-io/wasm-ad/sdk/tinygo@v0.1.0
+go mod edit -require=github.com/raskell-io/wasm-ad/sdk/tinygo@v0.2.0
 go mod download github.com/raskell-io/wasm-ad/sdk/tinygo
 cp "$(go list -m -f '{{.Dir}}' github.com/raskell-io/wasm-ad/sdk/tinygo)/wasm-ad.json" .
 ```
@@ -96,14 +100,39 @@ Two rules follow from how a host runs a cart (§3.1, §12):
 
 | | |
 |---|---|
-| Registers | `DISPCNT`, `BGCNT(bg)`, `BGHOFS(bg)`, `BGVOFS(bg)`, `WIN0H` … `BLDY`, `KEYS`, `FRAME`, `SEED`, `SAVECNT`, `SAVESTAT`, `SPEC`, with `.Read()` / `.Write(v)` |
-| Bits | `Mode0` … `DispObjWin` (DISPCNT), `Layer*`, `Blend*`, `BlendCnt`, `BlendAlphaCoeffs`, `Key*`, `Map*` |
-| Backgrounds | `BgCnt(0).ScreenBlock(b).Priority(p)…`, `NewScreenEntry(tile, bank)`, `ScreenBlock(n)`, `BGTiles(block)`, `VRAM()` |
+| Registers | `DISPCNT`, `BGCNT(bg)`, `BGHOFS(bg)`, `BGVOFS(bg)`, `BG2PA` … `BG3Y`, `WIN0H` … `BLDY`, `SOUND1CNT_L` … `SOUNDCNT_X`, `PCMA_SAD` … `PCMB_POS`, `KEYS`, `FRAME`, `SEED`, `SAVECNT`, `SAVESTAT`, `SPEC`, with `.Read()` / `.Write(v)` |
+| Bits | `Mode0` … `DispObjWin` (DISPCNT), `Layer*`, `Blend*`, `BlendCnt`, `BlendAlphaCoeffs`, `Key*`, `Map*`, `Affine16x16` … `Affine128x128` |
+| Backgrounds | `BgCnt(0).ScreenBlock(b).Priority(p)…`, `.AffineSize(s)`, `.Wrap()`, `NewScreenEntry(tile, bank)`, `ScreenBlock(n)`, `BGTiles(block)`, `BGTiles8(block)`, `AffineMap(block)`, `SetBGAffine(bg, m, tx, ty, sx, sy)`, `VRAM()` |
 | Colors | `RGB(r, g, b)`, `BGPalette()`, `ObjPalette()` |
 | Sprites | `NewSprite(x, y, S16x16, tile).Bank(b).Priority(p).Affine(slot, double)…`, `OAMSet`, `OAMHide`, `OAMHideAll`, `OAMSetAffine`, `ObjTiles()` |
 | Math | `Sin`, `Cos` (angle in 1/256 turns, result in Q14), `RotateScaleFixed(angle, sx, sy)`: the same tables and rounding as every other SDK |
+| Sound | `SoundEnable`, `SoundDisable`, `SoundStart`, `SoundLength`, `Duty12` … `Duty75`, `Wave*`, `SoundRate(hz)`, `SoundSweep`, `SoundEnvelope`, `SoundLengthTicks`, `SoundNoise`, `WaveRAM()`, `SampleRAM()`, `SoundStatus()` |
+| Samples | `PCMPlay`, `PCMPlayLooped`, `PCMStop`, `PCMPosition`, `PCMPlaying`, channels `PCMA` and `PCMB` |
 | Input | `Keys()`, `Buttons` with `Update`, `Held`, `Pressed` |
 | System | `Frame()`, `Seed()`, `SaveRAM()`, `SaveRestored()`, `RequestSave()`, `Trace(msg)` |
 
 Slices returned by the accessors point straight at hardware memory; writing
 to them is writing to the console.
+
+## Sound
+
+Turn sound on once with `SoundEnable()`, then start a channel by writing its
+registers with `SoundStart` set; the host clears the bit after acting on it.
+The builders fill in the fields:
+
+```go
+wasmad.SOUND2CNT_L.Write(wasmad.Duty50 | wasmad.SoundEnvelope(12, 2, false))
+wasmad.SOUND2CNT_H.Write(wasmad.SoundStart | wasmad.SoundRate(440))
+```
+
+Sample channels play signed 8-bit samples from `SampleRAM()`:
+`PCMPlay(wasmad.PCMA, start, len, rate, volume)`. Registers are read once per
+frame, after `update` (SPEC.md §14).
+
+## Affine backgrounds
+
+In `Mode1` BG2, and in `Mode2` BG2 and BG3, are affine: a byte map from
+`AffineMap(block)` of 8bpp tiles from `BGTiles8(block)`, drawn through a matrix.
+`SetBGAffine(2, wasmad.RotateScaleFixed(angle, 256, 256), tx, ty, 120, 80)`
+rotates the map around texture pixel (tx, ty), shown at the screen centre
+(SPEC.md §8.4).

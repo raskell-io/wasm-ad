@@ -1,11 +1,12 @@
-# WASM-AD Specification, version 0.1 (draft)
+# WASM-AD Specification, version 0.2 (draft)
 
 WASM-AD is a fantasy console whose games are WebAssembly modules. Its video
 hardware follows the Game Boy Advance: a 240×160 display composed from tiled
 backgrounds and sprites, 15-bit color, palette banks, rotation and scaling,
-alpha blending, windows and mosaic. A cart drives the hardware the way a GBA
-cartridge did, by writing registers and video memory, except that this
-memory lives inside the cart's own WebAssembly linear memory.
+alpha blending, windows and mosaic. Its sound follows the GBA's four
+channels, with two sample channels in place of its FIFOs. A cart drives the
+hardware the way a GBA cartridge did, by writing registers and video memory,
+except that this memory lives inside the cart's own WebAssembly linear memory.
 
 The key words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
 
@@ -28,7 +29,9 @@ are useful further reading.
 11. [Save RAM](#11-save-ram)
 12. [Determinism and save states](#12-determinism-and-save-states)
 13. [Toolchain notes](#13-toolchain-notes)
-14. [Reserved for future versions](#14-reserved-for-future-versions)
+14. [Sound](#14-sound)
+15. [Reserved for future versions](#15-reserved-for-future-versions)
+16. [Changes](#16-changes)
 
 ## 1. Overview
 
@@ -37,11 +40,12 @@ are useful further reading.
 | Display | 240×160 pixels, 60 frames per second |
 | Color | RGB555 (32,768 colors) |
 | Palettes | 256 background + 256 sprite colors, as 16 banks of 16 or as one 256-color palette |
-| Video modes | 0 (four tiled backgrounds), 3, 4 and 5 (bitmaps) |
+| Video modes | 0 (four tiled backgrounds), 1 and 2 (tiled and affine backgrounds), 3, 4 and 5 (bitmaps) |
 | Tiles | 8×8, 4 or 8 bits per pixel; 64 KB background VRAM, 32 KB sprite VRAM |
 | Sprites | 128, sizes 8×8 to 64×64, 32 affine matrices |
 | Effects | alpha blending, brightness fades, two rectangular windows and a sprite window, mosaic |
 | Raster effects | optional per-scanline callback |
+| Sound | 48 kHz stereo: two square, one wave and one noise channel, two 8-bit sample channels |
 | Input | 10 buttons: D-pad, A, B, L, R, Start, Select |
 | Save | 32 KB battery-backed save RAM |
 | Cart | one `.wasm` file, at most 32 MiB |
@@ -80,7 +84,7 @@ A cart MUST contain a custom section named `wasm-ad` holding UTF-8 text, one
 
 | Key | | |
 |---|---|---|
-| `spec` | required | Spec version the cart targets, e.g. `0.1`. |
+| `spec` | required | Spec version the cart targets, e.g. `0.2`. |
 | `title` | required | Display name. Hosts key save data by `title` and `author`. |
 | `author` | optional | |
 | `version` | optional | The cart's own version. |
@@ -97,9 +101,10 @@ at least 16 MiB and MAY refuse growth beyond that.
 ### 3.1 Boot
 
 1. The host instantiates the cart, providing `env.trace` if imported.
-2. The host zero-fills the hardware region (0x00000–0x27FFF) and hides all
-   sprites by setting attribute 0 of every OAM entry to 0x0200. It then
-   writes `SEED` and `SPEC`, loads save RAM (§11) and sets `SAVESTAT`.
+2. The host zero-fills the hardware region (0x00000–0x27FFF), hides all
+   sprites by setting attribute 0 of every OAM entry to 0x0200, and sets
+   `BG2PA`, `BG2PD`, `BG3PA` and `BG3PD` to 0x0100 (the identity matrix). It
+   then writes `SEED` and `SPEC`, loads save RAM (§11) and sets `SAVESTAT`.
 3. If `start` is exported, the host calls it.
 
 ### 3.2 Frame
@@ -108,8 +113,9 @@ The host runs 60 frames per second. Each frame:
 
 1. The host writes `KEYS` and `FRAME`, and sets `VCOUNT` to 160.
 2. The host calls `update()`.
-3. The host latches VRAM and OAM. Writes to them after this point take
-   effect on the next frame.
+3. The host latches VRAM and OAM, and runs the frame's sound (§14.2). Writes
+   to VRAM, OAM and the sound registers after this point take effect on the
+   next frame.
 4. For each line `y` from 0 to 159: the host sets `VCOUNT` to `y`; calls
    `scanline(y)` if exported; then draws line `y` using the current display
    registers and palette RAM and the latched VRAM and OAM. A `scanline`
@@ -128,12 +134,12 @@ values are little-endian.
 | Range | Size | Region |
 |---|---|---|
 | 0x00000–0x003FF | 1 KB | Null page: never read or written by the host |
-| 0x00400–0x007FF | 1 KB | I/O: display registers at 0x400 (§6), system registers at 0x700 (§5) |
+| 0x00400–0x007FF | 1 KB | I/O: display registers at 0x400 (§6), sound registers at 0x460 (§14), system registers at 0x700 (§5), sound state at 0x780 (§14.8) |
 | 0x00800–0x00BFF | 1 KB | Palette RAM: background 0x800, sprites 0xA00 (§7) |
 | 0x00C00–0x00FFF | 1 KB | OAM (§9) |
 | 0x01000–0x18FFF | 96 KB | VRAM (§8) |
 | 0x19000–0x20FFF | 32 KB | Save RAM (§11) |
-| 0x21000–0x27FFF | 28 KB | Reserved (audio, §14). Carts MUST NOT use it. |
+| 0x21000–0x27FFF | 28 KB | Sample RAM (§14.6) |
 | 0x28000– | | Free for the cart: data, stack, heap |
 
 The cart's data segments, stack and heap MUST lie at or above 0x28000. A
@@ -150,7 +156,7 @@ These registers have no GBA counterpart.
 | 0x708 | `SEED` | u32 | host | Random value fixed at boot; the only entropy source (§12). |
 | 0x70C | `SAVECNT` | u16 | cart | Bit 0: request that save RAM be persisted after this frame. The host clears it. |
 | 0x70E | `SAVESTAT` | u16 | host | Bit 0: save RAM was restored from storage at boot. |
-| 0x710 | `SPEC` | u16 | host | Spec version the host implements: major × 256 + minor (0.1 → 0x0001). |
+| 0x710 | `SPEC` | u16 | host | Spec version the host implements: major × 256 + minor (0.2 → 0x0002). |
 
 `KEYS` bits, in GBA order: 0 A, 1 B, 2 Select, 3 Start, 4 Right, 5 Left,
 6 Up, 7 Down, 8 R, 9 L. Unlike the GBA's `KEYINPUT`, a set bit means pressed.
@@ -163,7 +169,9 @@ These registers have no GBA counterpart.
 | 0x406 | `VCOUNT` | Current line, written by the host (§3.2) |
 | 0x408–0x40E | `BG0CNT`–`BG3CNT` | Background control |
 | 0x410–0x41E | `BG0HOFS`, `BG0VOFS` … `BG3VOFS` | Background scroll, 9 bits each |
-| 0x420–0x43E | | Reserved: affine background parameters (§14) |
+| 0x420–0x426 | `BG2PA`, `BG2PB`, `BG2PC`, `BG2PD` | BG2 affine matrix, signed 8.8 (§8.4) |
+| 0x428, 0x42C | `BG2X`, `BG2Y` | BG2 reference point, u32 (§8.4) |
+| 0x430–0x43C | `BG3PA` … `BG3Y` | The same for BG3 |
 | 0x440, 0x442 | `WIN0H`, `WIN1H` | Window horizontal bounds |
 | 0x444, 0x446 | `WIN0V`, `WIN1V` | Window vertical bounds |
 | 0x448 | `WININ` | Layers inside WIN0 (bits 0–5) and WIN1 (bits 8–13) |
@@ -173,13 +181,14 @@ These registers have no GBA counterpart.
 | 0x452 | `BLDALPHA` | Alpha coefficients |
 | 0x454 | `BLDY` | Brightness coefficient |
 
-All other addresses in 0x400–0x6FF are reserved; carts SHOULD leave them zero.
+Sound registers are at 0x460–0x4CF (§14.4). All other addresses in
+0x400–0x6FF are reserved; carts SHOULD leave them zero.
 
 ### 6.1 DISPCNT
 
 | Bits | |
 |---|---|
-| 0–2 | Video mode: 0, 3, 4 or 5. Modes 1, 2, 6 and 7 are reserved and display as forced blank. |
+| 0–2 | Video mode, 0–5. Modes 6 and 7 are reserved and display as forced blank. |
 | 4 | Bitmap page select (modes 4 and 5) |
 | 6 | Sprite tile mapping: 0 = 2D, 1 = 1D (§9.3) |
 | 7 | Forced blank: the display shows white |
@@ -188,8 +197,14 @@ All other addresses in 0x400–0x6FF are reserved; carts SHOULD leave them zero.
 | 13, 14 | Enable WIN0, WIN1 |
 | 15 | Enable the sprite window |
 
-In mode 0, BG0–BG3 are tiled backgrounds. In modes 3–5 only BG2 exists and
-it shows the bitmap.
+| Mode | BG0 | BG1 | BG2 | BG3 |
+|---|---|---|---|---|
+| 0 | tiled | tiled | tiled | tiled |
+| 1 | tiled | tiled | affine | none |
+| 2 | none | none | affine | affine |
+| 3–5 | none | none | bitmap | none |
+
+Tiled backgrounds are described in §8.2, affine ones in §8.4 and bitmaps in §8.3.
 
 ### 6.2 BGxCNT
 
@@ -198,9 +213,10 @@ it shows the bitmap.
 | 0–1 | Priority, 0 (front) to 3 (back) |
 | 2–3 | Character base block: tiles start at VRAM + block × 0x4000 |
 | 6 | Mosaic |
-| 7 | 0 = 4bpp tiles with 16 banks of 16 colors, 1 = 8bpp tiles with 256 colors |
+| 7 | 0 = 4bpp tiles with 16 banks of 16 colors, 1 = 8bpp tiles with 256 colors. Affine backgrounds are always 8bpp. |
 | 8–12 | Screen base block: the map starts at VRAM + block × 0x800 |
-| 14–15 | Map size: 0 = 32×32 tiles, 1 = 64×32, 2 = 32×64, 3 = 64×64 |
+| 13 | Affine backgrounds only: 0 = transparent outside the map, 1 = the map repeats |
+| 14–15 | Map size. Tiled: 0 = 32×32 tiles, 1 = 64×32, 2 = 32×64, 3 = 64×64. Affine: 0 = 16×16, 1 = 32×32, 2 = 64×64, 3 = 128×128 |
 
 ### 6.3 Windows
 
@@ -255,7 +271,7 @@ Output conversion to 8 bits per channel is `c8 = (c5 << 3) | (c5 >> 2)`.
 
 VRAM spans 96 KB at 0x01000. Offsets in this section are relative to its start.
 
-| Range | Mode 0 | Modes 3–5 |
+| Range | Modes 0–2 | Modes 3–5 |
 |---|---|---|
 | 0x00000–0x0FFFF | Background tiles and maps | Bitmap |
 | 0x10000–0x13FFF | Sprite tiles 0–511 | Bitmap (mode 3) or unused |
@@ -295,6 +311,39 @@ low 9 bits.
 window/blend participation apply. In mode 4, index 0 is transparent. Pixels
 outside a mode 5 bitmap are transparent. In bitmap modes only sprite tiles
 512–1023 are displayed; sprites using lower tile indices are not drawn.
+
+### 8.4 Affine backgrounds
+
+An affine background is drawn through a matrix, so it can be rotated, scaled
+and sheared, as affine sprites are (§9.4). Its map is a square of N×N tiles,
+N = 16, 32, 64 or 128 (`BGxCNT` bits 14–15), stored row by row at the screen
+base with one byte per entry: the tile index, 0–255. There are no flips or
+palette banks. Tiles are 8bpp, at character base + index × 64. Map entries
+and tile data at or beyond VRAM offset 0x10000 read as transparent.
+
+`BGxPA`–`BGxPD` hold the matrix as signed 8.8 fixed point. `BGxX` and `BGxY`
+hold the reference point as signed 20.8 fixed point in bits 0–27, sign-extended
+from bit 27; bits 28–31 are ignored. Scroll registers do not apply.
+
+Screen pixel (x, y), after mosaic (§6.4), shows map pixel
+
+```
+u = (X + PA × x + PB × y) >> 8
+v = (Y + PC × x + PD × y) >> 8
+```
+
+using arithmetic shifts. If u or v is outside 0 to 8N − 1, the pixel is
+transparent, or with `BGxCNT` bit 13 set both are taken modulo 8N. Tile index
+0 is an ordinary tile, but color index 0 is transparent.
+
+The GBA latches the reference point once per frame and adds PB and PD to it
+after each line, and writing `BGxX` or `BGxY` mid-frame reloads it. WASM-AD
+computes it from the line number instead, so the two agree unless a
+`scanline` callback changes PB or PD. Per-line effects (a "mode 7" floor)
+should set `BGxX` and `BGxY` for every line.
+
+To show texture pixel (tx, ty) at screen pixel (sx, sy), rotating and scaling
+around it: X = tx × 256 − (PA × sx + PB × sy), Y = ty × 256 − (PC × sx + PD × sy).
 
 ## 9. OAM: sprites
 
@@ -419,8 +468,12 @@ sequence of `KEYS` values. It has no access to wall-clock time or any other
 entropy. Hosts MUST call `update` exactly once per frame as described in
 §3.2, so a recorded seed and input sequence replays exactly.
 
+Sound output is likewise a function of memory (§14), so a recorded seed and
+input sequence also reproduce the sound sample for sample.
+
 Between frames a cart's whole state is its linear memory: the call stack is
-empty, so the stack pointer is back at its initial value. A host MAY
+empty, so the stack pointer is back at its initial value. That includes the
+sound hardware's state, which the host keeps in memory (§14.8). A host MAY
 implement save states, rewind and netplay by snapshotting linear memory
 between frames. Carts MUST NOT keep state in mutable WebAssembly globals
 other than the stack pointer.
@@ -448,10 +501,229 @@ the metadata after linking. The repository's `sdk/` directory has SDKs and
 build setups for Rust, C and C++, Zig, AssemblyScript and Go (TinyGo), and
 `tools/wasmad.mjs check` validates a cart against this specification.
 
-## 14. Reserved for future versions
+## 14. Sound
 
-- **Audio** (0.2): four tone/noise channels with GBA-compatible registers at
-  0x460–0x4A8, and two PCM sample channels fed from buffers in 0x21000–0x27FFF.
-- **Affine backgrounds**: video modes 1 and 2 and the BG2/BG3 affine
-  parameters at 0x420–0x43E.
+Sound comes from six channels: two square waves (channels 1 and 2), a wave
+channel playing 4-bit samples from wave RAM (channel 3), a noise channel
+(channel 4), and two sample channels (A and B) playing 8-bit samples from
+sample RAM. Channels 1–4 have the GBA's registers and behavior, simplified
+where noted; GBATEK's and Pan Docs' descriptions of the Game Boy sound
+channels apply. The sample channels replace the GBA's FIFOs and DMA.
+
+The output is 48,000 stereo samples per second, 16-bit signed, 800 per frame.
+It is a function of memory alone, with integer arithmetic throughout, so
+every host produces the same samples. Where this section leaves a detail
+open, the reference implementation (`core/src/sound.rs` in the repository) is
+normative.
+
+### 14.1 Clock
+
+Channels 1–4 run on a clock of 2,097,152 (2^21) ticks per second. Ticks are
+counted from boot, starting at tick 0. Output sample k (counted from boot)
+covers ticks floor(k × 16384 / 375) up to but not including
+floor((k + 1) × 16384 / 375): 43 or 44 ticks.
+
+The frame sequencer clocks at every tick that is a multiple of 4096 (512
+times a second), including tick 0, with step number (tick / 4096) mod 8:
+
+| Steps | Clocks |
+|---|---|
+| 0, 2, 4, 6 | Length counters (256 Hz) |
+| 2, 6 | Channel 1's sweep (128 Hz) |
+| 7 | Envelopes (64 Hz) |
+
+Within a tick, the sequencer acts first; then each channel's level for the
+tick is taken; then each channel's timer counts down.
+
+### 14.2 Frame
+
+At step 3 of each frame (§3.2) the host:
+
+1. Reads the sound registers, wave RAM and sample RAM. These values hold for
+   the whole frame.
+2. If `SOUNDCNT_X` bit 7 is clear, stops every channel. Otherwise it stops
+   each sample channel whose stop bit is set, then starts each channel whose
+   start bit is set (§14.3–14.6). A channel's start bit is bit 15 of
+   `SOUND1CNT_X`, `SOUND2CNT_H`, `SOUND3CNT_X`, `SOUND4CNT_H` or `PCMx_CNT`;
+   a sample channel's stop bit is bit 14 of `PCMx_CNT`.
+3. Clears every start and stop bit, whether or not it acted on it.
+4. Produces the frame's 800 samples (§14.7).
+5. Writes the channel status into `SOUNDCNT_X` bits 0–5 and each sample
+   channel's position into `PCMx_POS`.
+
+### 14.3 Square channels (1 and 2)
+
+| Register | Bits | |
+|---|---|---|
+| `SOUND1CNT_L` (0x460) | 0–2 | Sweep shift n |
+| | 3 | Sweep direction: 0 = up, 1 = down |
+| | 4–6 | Sweep time t, in 128ths of a second; 0 = no sweep |
+| `SOUND1CNT_H` (0x462), `SOUND2CNT_L` (0x468) | 0–5 | Length L: the channel plays for 64 − L length clocks |
+| | 6–7 | Duty: 0 = 12.5%, 1 = 25%, 2 = 50%, 3 = 75% |
+| | 8–10 | Envelope step time, in 64ths of a second; 0 = constant volume |
+| | 11 | Envelope direction: 0 = down, 1 = up |
+| | 12–15 | Initial volume, 0–15 |
+| `SOUND1CNT_X` (0x464), `SOUND2CNT_H` (0x46C) | 0–10 | Rate R: the tone is 131072 / (2048 − R) Hz |
+| | 14 | Length enable |
+| | 15 | Start (host clears) |
+
+A square channel steps through an 8-step cycle and is high on the first 1, 2,
+4 or 6 steps, by duty. Each step lasts 2 × (2048 − R) ticks, with R read
+when the step begins. While running, its level is +V when high and −V when
+low, where V is the envelope volume; a stopped channel's level is 0.
+
+Starting a channel turns it on at step 0 with V = the initial volume, loads
+its length counter with 64 − L and latches the envelope settings, which are
+read only at start.
+
+**Length.** On each length clock, if length enable is set and the counter is
+nonzero, the counter decreases by one; when it reaches 0 the channel stops.
+
+**Envelope.** A countdown is set to the step time at start. On each envelope
+clock with a nonzero step time, it decreases by one; when it reaches 0 it
+reloads with the step time and V moves one step in the envelope direction,
+staying within 0–15. A channel at volume 0 is silent but still on.
+
+**Sweep** (channel 1 only). The sweep is active while t and n are both
+nonzero. At start the swept rate F is set to R and a countdown to t. On each
+sweep clock while active, the countdown decreases by one (if not 0
+already); when it is 0 it reloads with t and F changes by F >> n, up or down.
+If the new F would exceed 2047 the channel stops; otherwise F takes the new
+value. While the sweep is active channel 1 uses F as its rate instead of R.
+
+### 14.4 Registers
+
+| Address | Name | |
+|---|---|---|
+| 0x460–0x464 | `SOUND1CNT_L`, `_H`, `_X` | Channel 1 (§14.3) |
+| 0x468, 0x46C | `SOUND2CNT_L`, `_H` | Channel 2 (§14.3) |
+| 0x470–0x474 | `SOUND3CNT_L`, `_H`, `_X` | Channel 3 (§14.5) |
+| 0x478, 0x47C | `SOUND4CNT_L`, `_H` | Channel 4 (§14.5) |
+| 0x480 | `SOUNDCNT_L` | Channels 1–4 volume and routing |
+| 0x482 | `SOUNDCNT_H` | Mixing and sample channel routing |
+| 0x484 | `SOUNDCNT_X` | Master enable and status |
+| 0x490–0x4AF | `WAVE_RAM` | Two banks of 16 bytes: bank 0 at 0x490, bank 1 at 0x4A0 |
+| 0x4B0–0x4BB | `PCMA_*` | Sample channel A (§14.6) |
+| 0x4C0–0x4CB | `PCMB_*` | Sample channel B |
+
+The addresses are the GBA's I/O offsets plus 0x400. The GBA shows only one
+wave RAM bank at a time; here both are always visible, covering the GBA's
+FIFO addresses, and the sample channels have registers of their own.
+
+`SOUNDCNT_L`: bits 0–2 right volume and bits 4–6 left volume (0–7, used as
+1–8 eighths); bits 8–11 send channels 1–4 to the right, bits 12–15 to the left.
+
+`SOUNDCNT_H`: bits 0–1 the volume of channels 1–4 together (0 = 25%, 1 = 50%,
+2 and 3 = 100%); bit 2 sample channel A's volume and bit 3 B's (0 = 50%,
+1 = 100%); bit 8 sends A to the right and bit 9 to the left; bits 12 and 13
+do the same for B. Bits 10, 11, 14 and 15 are reserved.
+
+`SOUNDCNT_X`: bit 7 enables sound; while it is clear every channel is
+stopped and the output is silent. Bits 0–5, written by the host, are set
+while channels 1–4, A and B are on.
+
+### 14.5 Wave and noise channels (3 and 4)
+
+| Register | Bits | |
+|---|---|---|
+| `SOUND3CNT_L` (0x470) | 5 | 0 = play one bank of 32 samples, 1 = both banks as 64 |
+| | 6 | The bank played (or played first) |
+| | 7 | Channel on. While clear, channel 3 is stopped and cannot start. |
+| `SOUND3CNT_H` (0x472) | 0–7 | Length L: the channel plays for 256 − L length clocks |
+| | 13–14 | Volume: 0 = 0%, 1 = 100%, 2 = 50%, 3 = 25% |
+| | 15 | Force 75% volume |
+| `SOUND3CNT_X` (0x474) | 0–10 | Rate R: one sample every 2048 − R ticks |
+| | 14 | Length enable |
+| | 15 | Start (host clears) |
+| `SOUND4CNT_L` (0x478) | 0–5, 8–15 | Length L and envelope, as for channels 1 and 2 |
+| `SOUND4CNT_H` (0x47C) | 0–2 | Divider r |
+| | 3 | Register width: 0 = 15 bits, 1 = 7 bits |
+| | 4–7 | Shift s |
+| | 14 | Length enable |
+| | 15 | Start (host clears) |
+
+**Channel 3** plays 4-bit samples from wave RAM, two per byte, high nibble
+first. Starting it sets its position to 0 and loads its length counter with
+256 − L. Each sample lasts 2048 − R ticks, R read when the sample begins. With
+one bank, position p (0–31) reads sample p of the selected bank; with both,
+p runs 0–63 and reads sample p mod 32 of bank (selected + p / 32) mod 2. A
+32-sample wave at rate R sounds at 65536 / (2048 − R) Hz, an octave below a
+square channel at the same R. The level of sample s is
+((2s − 15) × m) >> 2 (arithmetic shift), with m = 4, 2, 1 or 0 for 100%,
+50%, 25% and 0%, or 3 when bit 15 forces 75%.
+
+**Channel 4** clocks a linear feedback shift register every
+(r = 0 ? 4 : 8r) << s ticks, r and s read when the period begins; with s = 14
+or 15 it does not clock. That is 524288 / r / 2^(s+1) Hz, with r = 0 as 0.5.
+Starting the channel sets the register to 0x7FFF, loads its length counter and
+envelope as for channels 1 and 2. On each clock, x = bit 0 XOR bit 1; the
+register shifts right by one and x goes into bit 14, and also into bit 6 with
+the 7-bit width. The level is +V while bit 0 is 0 and −V while it is 1.
+
+Length counting is as in §14.3.
+
+### 14.6 Sample channels (A and B)
+
+Sample RAM, 28 KB at 0x21000–0x27FFF, holds signed 8-bit samples. Each sample
+channel has six registers, at 0x4B0 for A and 0x4C0 for B:
+
+| Offset | Name | |
+|---|---|---|
+| +0x0 | `PCMx_SAD` | Start: offset of the first sample in sample RAM |
+| +0x2 | `PCMx_LEN` | Length in samples |
+| +0x4 | `PCMx_LOOP` | Loop point, in samples from the start |
+| +0x6 | `PCMx_RATE` | Playback rate in samples per second (Hz) |
+| +0x8 | `PCMx_CNT` | Bits 0–6 volume (0–64; higher is 64), bit 13 loop, bit 14 stop, bit 15 start; the host clears 14 and 15 |
+| +0xA | `PCMx_POS` | Written by the host: the position, in samples from the start |
+
+Sample i of a channel is the byte at 0x21000 + ((SAD + i) mod 0x7000). The
+registers other than the start and stop bits are read each frame, so a cart
+can change the rate, volume or loop of a playing sample.
+
+Starting a channel sets its position p and an accumulator a to 0 and turns it
+on. For each output sample, while the channel is on: if p ≥ LEN it moves to
+LOOP when looping with LOOP < LEN, and stops otherwise; then the channel's
+level is sample p × volume; then a increases by RATE, and while a ≥ 48000, a
+decreases by 48000 and p by one more, applying the same end-of-sample rule
+after each step (a stop ends the sample). A stopped channel's level is 0.
+
+A cart can stream sound longer than sample RAM by looping over a buffer and
+refilling the part behind `PCMx_POS` each frame.
+
+### 14.7 Mixing
+
+For output sample k, each of channels 1–4 contributes its level summed over
+the ticks the sample covers (§14.1), S1–S4, and T is the number of those
+ticks. For each side, with volume v (0–7) and PSG volume p (`SOUNDCNT_H` bits
+0–1, with 3 taken as 2), the sum S of the S values of the channels sent to
+that side gives
+
+```
+psg = trunc(S × (v + 1) × 32 / (T × 2^(2 − p)))
+```
+
+(division rounding toward zero). Each sample channel sent to that side adds
+its level, halved with an arithmetic shift at 50% volume. The sum, clamped to
+−32768 … 32767, is the side's output. With every channel at full volume the
+total stays within range, so the clamp never acts on in-range settings.
+
+Hosts SHOULD play the output at 48 kHz and keep latency low, and MAY drop or
+repeat whole frames of output to stay in step with real time.
+
+### 14.8 Sound state
+
+The channels' internal state (timers, counters, positions, the shift
+register, the frame sequencer's place) is kept by the host in memory at
+0x780–0x7FF, in a layout of the host's choosing, so that a snapshot of
+linear memory includes it (§12). At boot it is zero, which means every
+channel is off at tick 0. Carts MUST NOT read or write it.
+
+## 15. Reserved for future versions
+
 - Cart icons in the `wasm-ad` custom section.
+
+## 16. Changes
+
+**0.2**: sound (§14) and sample RAM; affine backgrounds and video modes 1 and
+2 (§8.4); the host initializes the BG2 and BG3 matrices at boot. A 0.1 cart
+runs unchanged on a 0.2 host.

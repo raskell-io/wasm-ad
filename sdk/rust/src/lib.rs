@@ -93,6 +93,43 @@ pub mod reg {
     pub const BLDCNT: Reg16 = Reg16(addr::BLDCNT);
     pub const BLDALPHA: Reg16 = Reg16(addr::BLDALPHA);
     pub const BLDY: Reg16 = Reg16(addr::BLDY);
+    pub const BG2PA: Reg16 = Reg16(addr::bgpa(2));
+    pub const BG2PB: Reg16 = Reg16(addr::bgpb(2));
+    pub const BG2PC: Reg16 = Reg16(addr::bgpc(2));
+    pub const BG2PD: Reg16 = Reg16(addr::bgpd(2));
+    pub const BG2X: Reg32 = Reg32(addr::bgx(2));
+    pub const BG2Y: Reg32 = Reg32(addr::bgy(2));
+    pub const BG3PA: Reg16 = Reg16(addr::bgpa(3));
+    pub const BG3PB: Reg16 = Reg16(addr::bgpb(3));
+    pub const BG3PC: Reg16 = Reg16(addr::bgpc(3));
+    pub const BG3PD: Reg16 = Reg16(addr::bgpd(3));
+    pub const BG3X: Reg32 = Reg32(addr::bgx(3));
+    pub const BG3Y: Reg32 = Reg32(addr::bgy(3));
+    pub const SOUND1CNT_L: Reg16 = Reg16(addr::SOUND1CNT_L);
+    pub const SOUND1CNT_H: Reg16 = Reg16(addr::SOUND1CNT_H);
+    pub const SOUND1CNT_X: Reg16 = Reg16(addr::SOUND1CNT_X);
+    pub const SOUND2CNT_L: Reg16 = Reg16(addr::SOUND2CNT_L);
+    pub const SOUND2CNT_H: Reg16 = Reg16(addr::SOUND2CNT_H);
+    pub const SOUND3CNT_L: Reg16 = Reg16(addr::SOUND3CNT_L);
+    pub const SOUND3CNT_H: Reg16 = Reg16(addr::SOUND3CNT_H);
+    pub const SOUND3CNT_X: Reg16 = Reg16(addr::SOUND3CNT_X);
+    pub const SOUND4CNT_L: Reg16 = Reg16(addr::SOUND4CNT_L);
+    pub const SOUND4CNT_H: Reg16 = Reg16(addr::SOUND4CNT_H);
+    pub const SOUNDCNT_L: Reg16 = Reg16(addr::SOUNDCNT_L);
+    pub const SOUNDCNT_H: Reg16 = Reg16(addr::SOUNDCNT_H);
+    pub const SOUNDCNT_X: Reg16 = Reg16(addr::SOUNDCNT_X);
+    pub const PCMA_SAD: Reg16 = Reg16(addr::PCM_A + addr::PCM_SAD);
+    pub const PCMA_LEN: Reg16 = Reg16(addr::PCM_A + addr::PCM_LEN);
+    pub const PCMA_LOOP: Reg16 = Reg16(addr::PCM_A + addr::PCM_LOOP);
+    pub const PCMA_RATE: Reg16 = Reg16(addr::PCM_A + addr::PCM_RATE);
+    pub const PCMA_CNT: Reg16 = Reg16(addr::PCM_A + addr::PCM_CNT);
+    pub const PCMA_POS: Reg16 = Reg16(addr::PCM_A + addr::PCM_POS);
+    pub const PCMB_SAD: Reg16 = Reg16(addr::PCM_B + addr::PCM_SAD);
+    pub const PCMB_LEN: Reg16 = Reg16(addr::PCM_B + addr::PCM_LEN);
+    pub const PCMB_LOOP: Reg16 = Reg16(addr::PCM_B + addr::PCM_LOOP);
+    pub const PCMB_RATE: Reg16 = Reg16(addr::PCM_B + addr::PCM_RATE);
+    pub const PCMB_CNT: Reg16 = Reg16(addr::PCM_B + addr::PCM_CNT);
+    pub const PCMB_POS: Reg16 = Reg16(addr::PCM_B + addr::PCM_POS);
     pub const KEYS: Reg16 = Reg16(addr::KEYS);
     pub const FRAME: Reg32 = Reg32(addr::FRAME);
     pub const SEED: Reg32 = Reg32(addr::SEED);
@@ -104,6 +141,10 @@ pub mod reg {
 /// `DISPCNT` bits (SPEC.md §6.1).
 pub mod dispcnt {
     pub const MODE0: u16 = 0;
+    /// BG0 and BG1 tiled, BG2 affine.
+    pub const MODE1: u16 = 1;
+    /// BG2 and BG3 affine.
+    pub const MODE2: u16 = 2;
     pub const MODE3: u16 = 3;
     pub const MODE4: u16 = 4;
     pub const MODE5: u16 = 5;
@@ -160,6 +201,15 @@ pub enum MapSize {
     S64x64 = 3,
 }
 
+/// Affine background map sizes, in tiles (SPEC.md §8.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AffineSize {
+    S16x16 = 0,
+    S32x32 = 1,
+    S64x64 = 2,
+    S128x128 = 3,
+}
+
 /// A `BGxCNT` value (SPEC.md §6.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BgCnt(pub u16);
@@ -185,6 +235,14 @@ impl BgCnt {
     }
     pub const fn mosaic(self) -> Self {
         Self(self.0 | 0x40)
+    }
+    /// Map size of an affine background.
+    pub const fn affine_size(self, s: AffineSize) -> Self {
+        Self((self.0 & 0x3FFF) | ((s as u16) << 14))
+    }
+    /// An affine background repeats instead of being transparent outside its map.
+    pub const fn wrap(self) -> Self {
+        Self(self.0 | 0x2000)
     }
 }
 
@@ -216,6 +274,37 @@ pub fn vram() -> &'static mut [u8] {
 pub fn bg_tiles(block: usize) -> &'static mut [Tile4] {
     assert!(block < 4);
     unsafe { view(VRAM + block * 0x4000, (4 - block) * 512) }
+}
+
+/// An 8bpp tile: 8 rows of 8 bytes. Affine backgrounds always use these.
+pub type Tile8 = [u8; 64];
+
+/// 8bpp background tiles from character block `block` (0–3) to the end of
+/// background VRAM.
+pub fn bg_tiles8(block: usize) -> &'static mut [Tile8] {
+    assert!(block < 4);
+    unsafe { view(VRAM + block * 0x4000, (4 - block) * 256) }
+}
+
+/// An affine background's map from screen block `block` (0–31) to the end of
+/// background VRAM: one tile index per byte, row-major (SPEC.md §8.4).
+pub fn affine_map(block: usize) -> &'static mut [u8] {
+    assert!(block < 32);
+    unsafe { view(VRAM + block * 0x800, 0x10000 - block * 0x800) }
+}
+
+/// Sets affine background `bg` (2 or 3) to matrix `m`, placed so that
+/// texture pixel (`tex_x`, `tex_y`) appears at screen pixel (`scr_x`, `scr_y`).
+/// Rotation and scaling then happen around that point.
+pub fn set_bg_affine(bg: usize, m: AffineMatrix, tex_x: i32, tex_y: i32, scr_x: i32, scr_y: i32) {
+    assert!(bg == 2 || bg == 3);
+    let (pa, pb, pc, pd) = (m.pa as i32, m.pb as i32, m.pc as i32, m.pd as i32);
+    Reg16(addr::bgpa(bg)).write(m.pa as u16);
+    Reg16(addr::bgpb(bg)).write(m.pb as u16);
+    Reg16(addr::bgpc(bg)).write(m.pc as u16);
+    Reg16(addr::bgpd(bg)).write(m.pd as u16);
+    Reg32(addr::bgx(bg)).write(((tex_x << 8) - pa * scr_x - pb * scr_y) as u32);
+    Reg32(addr::bgy(bg)).write(((tex_y << 8) - pc * scr_x - pd * scr_y) as u32);
 }
 
 /// The 1024 4bpp sprite tiles.
@@ -428,6 +517,140 @@ pub mod fixed {
     }
 }
 
+/// Sound (SPEC.md §14): four GBA-style channels written through
+/// `reg::SOUND*`, with builders for their fields, and setup.
+///
+/// ```ignore
+/// sound::enable();
+/// reg::SOUND2CNT_L.write(sound::DUTY_50 | sound::envelope(12, 2, false));
+/// reg::SOUND2CNT_H.write(sound::START | sound::rate(440));
+/// ```
+pub mod sound {
+    use super::*;
+
+    /// Starts (or restarts) a channel; the host clears it.
+    pub const START: u16 = 1 << 15;
+    /// Stops the channel when its length runs out.
+    pub const LENGTH: u16 = 1 << 14;
+
+    pub const DUTY_12: u16 = 0 << 6;
+    pub const DUTY_25: u16 = 1 << 6;
+    pub const DUTY_50: u16 = 2 << 6;
+    pub const DUTY_75: u16 = 3 << 6;
+
+    /// `SOUND3CNT_L`: the wave channel is on.
+    pub const WAVE_ON: u16 = 1 << 7;
+    /// `SOUND3CNT_L`: play bank 1 (or start with it, with `WAVE_64`).
+    pub const WAVE_BANK1: u16 = 1 << 6;
+    /// `SOUND3CNT_L`: play both banks as one 64-sample wave.
+    pub const WAVE_64: u16 = 1 << 5;
+    /// `SOUND3CNT_H` volumes.
+    pub const WAVE_100: u16 = 1 << 13;
+    pub const WAVE_50: u16 = 2 << 13;
+    pub const WAVE_25: u16 = 3 << 13;
+    pub const WAVE_75: u16 = 1 << 15;
+
+    /// Turns sound on with every channel on both sides at full volume.
+    pub fn enable() {
+        reg::SOUNDCNT_X.write(0x80);
+        reg::SOUNDCNT_L.write(0xFF77);
+        reg::SOUNDCNT_H.write(0x330E);
+    }
+
+    /// Turns sound off; every channel stops.
+    pub fn disable() {
+        reg::SOUNDCNT_X.write(0);
+    }
+
+    /// The rate field for a square channel playing `hz` (64 Hz and up); the
+    /// wave channel plays an octave lower at the same rate.
+    pub const fn rate(hz: u32) -> u16 {
+        if hz < 64 { 0 } else { (2048 - 131072 / hz) as u16 }
+    }
+
+    /// `SOUND1CNT_L`: every `time` 128ths of a second (1–7, 0 = off), the
+    /// rate changes by rate >> `shift` (1–7), down if `decrease`.
+    pub const fn sweep(time: u16, shift: u16, decrease: bool) -> u16 {
+        ((time & 7) << 4) | (shift & 7) | if decrease { 8 } else { 0 }
+    }
+
+    /// The envelope fields: start at `volume` (0–15), stepping by one every
+    /// `step` 64ths of a second (0 = constant), up if `increase`.
+    pub const fn envelope(volume: u16, step: u16, increase: bool) -> u16 {
+        ((volume & 15) << 12) | ((step & 7) << 8) | if increase { 1 << 11 } else { 0 }
+    }
+
+    /// The length field of channels 1, 2 and 4 for `n` 256ths of a second
+    /// (1–64); it only counts with `LENGTH` set. Channel 3 takes 256 − n.
+    pub const fn length(n: u16) -> u16 {
+        64u16.wrapping_sub(n) & 63
+    }
+
+    /// `SOUND4CNT_H`: noise from a divider (0–7) and shift (0–13), with the
+    /// 7-bit register if `short` (more tonal).
+    pub const fn noise(divider: u16, shift: u16, short: bool) -> u16 {
+        (divider & 7) | ((shift & 15) << 4) | if short { 8 } else { 0 }
+    }
+
+    /// Wave RAM: two banks of 16 bytes, each 32 4-bit samples, high nibble first.
+    pub fn wave_ram() -> &'static mut [u8] {
+        unsafe { view(WAVE_RAM, 32) }
+    }
+
+    /// The 28 KB of sample RAM that the sample channels play from.
+    pub fn sample_ram() -> &'static mut [i8] {
+        unsafe { view(SAMPLE_RAM, SAMPLE_RAM_SIZE) }
+    }
+
+    /// Which channels are playing: bits 0–3 channels 1–4, bits 4 and 5 sample
+    /// channels A and B, as of the end of the last frame.
+    pub fn status() -> u16 {
+        reg::SOUNDCNT_X.read() & 0x3F
+    }
+}
+
+/// The two sample channels, A (0) and B (1), playing signed 8-bit samples
+/// from [`sound::sample_ram`] (SPEC.md §14.6).
+pub mod pcm {
+    use super::*;
+
+    fn base(ch: usize) -> usize {
+        assert!(ch < 2);
+        if ch == 0 { PCM_A } else { PCM_B }
+    }
+
+    /// Plays `len` samples from sample RAM offset `start` at `rate` Hz and
+    /// `volume` 0–64, once.
+    pub fn play(ch: usize, start: u16, len: u16, rate: u16, volume: u16) {
+        let b = base(ch);
+        Reg16(b + PCM_SAD).write(start);
+        Reg16(b + PCM_LEN).write(len);
+        Reg16(b + PCM_RATE).write(rate);
+        Reg16(b + PCM_CNT).write(sound::START | volume.min(64));
+    }
+
+    /// Like [`play`], then repeats from sample `loop_at` until stopped.
+    pub fn play_looped(ch: usize, start: u16, len: u16, loop_at: u16, rate: u16, volume: u16) {
+        Reg16(base(ch) + PCM_LOOP).write(loop_at);
+        play(ch, start, len, rate, volume);
+        let cnt = Reg16(base(ch) + PCM_CNT);
+        cnt.write(cnt.read() | 1 << 13);
+    }
+
+    pub fn stop(ch: usize) {
+        Reg16(base(ch) + PCM_CNT).write(1 << 14);
+    }
+
+    /// The playback position, in samples from the start, as of the end of the last frame.
+    pub fn position(ch: usize) -> u16 {
+        Reg16(base(ch) + PCM_POS).read()
+    }
+
+    pub fn playing(ch: usize) -> bool {
+        sound::status() & (1 << (4 + ch)) != 0
+    }
+}
+
 /// Buttons held this frame.
 pub fn keys() -> u16 {
     reg::KEYS.read()
@@ -510,7 +733,7 @@ macro_rules! cart {
     (title: $title:literal $(, $key:ident : $value:literal)* $(,)?) => {
         #[cfg(target_arch = "wasm32")]
         const _: () = {
-            const META: &str = concat!("spec=0.1\ntitle=", $title, "\n" $(, stringify!($key), "=", $value, "\n")*);
+            const META: &str = concat!("spec=0.2\ntitle=", $title, "\n" $(, stringify!($key), "=", $value, "\n")*);
             #[unsafe(link_section = "wasm-ad")]
             #[used]
             static WASM_AD_META: [u8; META.len()] = $crate::__bytes::<{ META.len() }>(META);
@@ -530,8 +753,8 @@ pub const fn __bytes<const N: usize>(s: &str) -> [u8; N] {
     out
 }
 
-/// A native stand-in for the console, for tests: drives frames and renders
-/// with the reference renderer. Each thread has its own hardware.
+/// A native stand-in for the console, for tests: drives frames, and renders
+/// and makes sound with the reference core. Each thread has its own hardware.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod host {
     use super::*;
@@ -541,6 +764,10 @@ pub mod host {
         let mut hw = vec![0u8; CART];
         for i in 0..128 {
             hw[OAM + i * 8..][..2].copy_from_slice(&OBJ_HIDDEN.to_le_bytes());
+        }
+        for bg in [2, 3] {
+            hw[bgpa(bg)..][..2].copy_from_slice(&0x100u16.to_le_bytes());
+            hw[bgpd(bg)..][..2].copy_from_slice(&0x100u16.to_le_bytes());
         }
         hw[SEED..SEED + 4].copy_from_slice(&seed.to_le_bytes());
         hw[SPEC..SPEC + 2].copy_from_slice(&SPEC_VERSION.to_le_bytes());
@@ -559,6 +786,14 @@ pub mod host {
         reg::FRAME.write(frame);
         reg::VCOUNT.write(160);
         update();
+    }
+
+    /// Generates the sound for the frame just run (call it after [`frame`],
+    /// as a host does): 800 stereo pairs at 48 kHz, left first.
+    pub fn sound() -> Vec<i16> {
+        let mut out = vec![0; wasm_ad_core::sound::SAMPLES * 2];
+        mem::HW.with(|hw| wasm_ad_core::sound::frame(unsafe { &mut *hw.get() }, &mut out));
+        out
     }
 
     /// Renders the current hardware state (no scanline callback) as RGBA8.
@@ -629,6 +864,41 @@ mod tests {
         assert_eq!(fixed::sin(-64), -16384);
         assert_eq!(AffineMatrix::rotate_scale_fixed(0, 256, 256), AffineMatrix::IDENTITY);
         assert_eq!(AffineMatrix::rotate_scale_fixed(64, 512, 256), AffineMatrix { pa: 0, pb: -128, pc: 256, pd: 0 });
+    }
+
+    #[test]
+    fn host_plays_what_the_cart_wrote() {
+        host::boot(1);
+        sound::enable();
+        reg::SOUND2CNT_L.write(sound::DUTY_50 | sound::envelope(15, 0, false));
+        reg::SOUND2CNT_H.write(sound::START | sound::rate(512));
+        host::frame(0, 0, || {});
+        let out = host::sound();
+        assert_eq!(out.iter().max(), Some(&3840));
+        assert_eq!(sound::status(), 0b10);
+
+        sound::sample_ram()[..2].copy_from_slice(&[64, -64]);
+        pcm::play(1, 0, 2, 48000, 64);
+        let out = host::sound();
+        assert_eq!(out[0] - out[2], 2 * 64 * 64, "PCM on top of the square wave");
+        assert!(!pcm::playing(1) && pcm::position(1) == 2);
+    }
+
+    #[test]
+    fn affine_background_places_the_texture_point() {
+        host::boot(1);
+        bg_palette()[1] = rgb(255, 0, 0);
+        bg_tiles8(0)[1] = [1; 64];
+        affine_map(8)[(5 * 16) + 3] = 1; // tile (3, 5)
+        reg::BGCNT[2].write(BgCnt::new().screen_block(8).affine_size(AffineSize::S16x16).0);
+        reg::DISPCNT.write(dispcnt::MODE1 | dispcnt::BG2);
+        // Texture pixel (24, 40), the top-left of tile (3, 5), at screen (100, 50).
+        set_bg_affine(2, AffineMatrix::IDENTITY, 24, 40, 100, 50);
+        let fb = host::render();
+        assert_eq!(fb[50 * SCREEN_W + 100], wasm_ad_core::rgba(rgb(255, 0, 0)));
+        assert_ne!(fb[50 * SCREEN_W + 99], wasm_ad_core::rgba(rgb(255, 0, 0)));
+        assert_eq!(sound::rate(440), 1751);
+        assert_eq!(sound::length(64), 0);
     }
 
     #[test]

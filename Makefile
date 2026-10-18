@@ -16,6 +16,8 @@ carts:
 	mkdir -p player/web/carts
 	cargo build --release --target wasm32-unknown-unknown $(addprefix -p ,$(CARTS))
 	for c in $(CARTS); do cp $(TARGET)/$$c.wasm player/web/carts/$$c.wasm; done
+	cargo build --release --target wasm32-unknown-unknown -p wasm-ad --example starter
+	cp $(TARGET)/examples/starter.wasm player/web/carts/starter.wasm
 
 serve: all
 	@echo "http://localhost:$(PORT)/?cart=carts/twirl.wasm"

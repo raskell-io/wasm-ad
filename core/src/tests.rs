@@ -59,7 +59,7 @@ fn backdrop_and_forced_blank() {
     assert_eq!(m.px(0, 0), rgba(BLUE));
     m.w16(DISPCNT, 0x80);
     assert_eq!(m.px(0, 0), 0xFFFF_FFFF);
-    m.w16(DISPCNT, 1); // reserved mode
+    m.w16(DISPCNT, 6); // reserved mode
     assert_eq!(m.px(0, 0), 0xFFFF_FFFF);
 }
 
@@ -270,4 +270,77 @@ fn affine_sprites() {
     m.obj(0, 0x300, 1 << 14, 0);
     matrix(&mut m, 128, 128);
     assert_eq!((m.px(0, 0), m.px(31, 31)), (rgba(RED), rgba(RED)));
+}
+
+/// Mode 1 with BG2 affine: a 16×16-tile map in screen block 8, tile 1 solid
+/// RED (8bpp, color 5), at map position (0, 0); identity matrix.
+fn affine_bg2() -> Mem {
+    let mut m = Mem::new();
+    m.w16(DISPCNT, 1 | 0x400).w16(bgcnt(2), 8 << 8).bg_color(0, BLUE).bg_color(5, RED);
+    m.0[VRAM + 64..VRAM + 128].fill(5);
+    m.0[VRAM + 8 * 0x800] = 1;
+    m.w16(bgpa(2), 256).w16(bgpd(2), 256);
+    m
+}
+
+fn w32(m: &mut Mem, a: usize, v: i32) {
+    m.0[a..a + 4].copy_from_slice(&v.to_le_bytes());
+}
+
+#[test]
+fn affine_background_samples_through_the_matrix() {
+    let mut m = affine_bg2();
+    assert_eq!((m.px(0, 0), m.px(7, 7)), (rgba(RED), rgba(RED)));
+    assert_eq!(m.px(8, 0), rgba(BLUE), "tile 0 is transparent");
+
+    // A texture step of 2 halves the tile on screen.
+    m.w16(bgpa(2), 512);
+    assert_eq!((m.px(3, 0), m.px(4, 0)), (rgba(RED), rgba(BLUE)));
+
+    // The reference point is 20.8 fixed point; negative moves the map right.
+    m.w16(bgpa(2), 256);
+    w32(&mut m, bgx(2), -8 << 8);
+    assert_eq!((m.px(0, 0), m.px(8, 0)), (rgba(BLUE), rgba(RED)));
+
+    // PB and PD apply per line: shear by one pixel per line.
+    w32(&mut m, bgx(2), 0);
+    m.w16(bgpb(2), 256);
+    assert_eq!((m.px(0, 4), m.px(4, 4)), (rgba(RED), rgba(BLUE)));
+}
+
+#[test]
+fn affine_background_wraps_or_clips() {
+    let mut m = affine_bg2();
+    assert_eq!(m.px(130, 0), rgba(BLUE), "outside the 128-pixel map");
+    m.w16(bgcnt(2), 8 << 8 | 0x2000);
+    assert_eq!(m.px(130, 0), rgba(RED), "wraps to u = 2");
+    // Size 1 is 32×32 tiles, so row 1 of the map starts 32 entries in.
+    m.w16(bgcnt(2), 8 << 8 | 1 << 14);
+    m.0[VRAM + 8 * 0x800 + 32] = 1;
+    assert_eq!(m.px(0, 8), rgba(RED), "row 1 starts 32 entries in");
+}
+
+#[test]
+fn affine_modes_choose_their_backgrounds() {
+    // Mode 1 keeps BG0 and BG1 tiled.
+    let mut m = red_bg0();
+    m.w16(DISPCNT, 1 | 0x100);
+    assert_eq!(m.px(0, 0), rgba(RED));
+    // Mode 2 has no tiled backgrounds; BG3 is affine.
+    m.w16(DISPCNT, 2 | 0x100);
+    assert_eq!(m.px(0, 0), rgba(BLUE));
+    let mut m = affine_bg2();
+    m.w16(bgcnt(3), 8 << 8).w16(bgpa(3), 256).w16(bgpd(3), 256).w16(DISPCNT, 2 | 0x800);
+    assert_eq!(m.px(0, 0), rgba(RED));
+    // Modes 6 and 7 are forced blank.
+    m.w16(DISPCNT, 6 | 0x800);
+    assert_eq!(m.px(0, 0), 0xFFFF_FFFF);
+}
+
+#[test]
+fn affine_modes_show_low_sprite_tiles() {
+    let mut m = Mem::new();
+    m.w16(DISPCNT, 1 | 0x1040).obj_color(1, RED);
+    m.solid4(OBJ_VRAM, 1).obj(0, 0, 0, 0);
+    assert_eq!(m.px(0, 0), rgba(RED));
 }

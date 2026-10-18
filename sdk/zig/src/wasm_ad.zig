@@ -20,8 +20,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 /// Spec version this SDK targets.
-pub const SPEC = "0.1";
-pub const SPEC_VERSION: u16 = 0x0001;
+pub const SPEC = "0.2";
+pub const SPEC_VERSION: u16 = 0x0002;
 
 pub const SCREEN_W = 240;
 pub const SCREEN_H = 160;
@@ -38,6 +38,14 @@ pub const addr = struct {
     pub const OBJ_VRAM: usize = VRAM + 0x10000;
     pub const SAVE: usize = 0x19000;
     pub const SAVE_SIZE: usize = 0x8000;
+    /// Sample RAM: signed 8-bit samples for the sample channels (SPEC.md §14.6).
+    pub const SAMPLE_RAM: usize = 0x21000;
+    pub const SAMPLE_RAM_SIZE: usize = 0x7000;
+    /// Two banks of 32 4-bit samples, bank 1 at `WAVE_RAM + 16`.
+    pub const WAVE_RAM: usize = 0x490;
+    /// Sample channel A; channel B is at `PCM_B`.
+    pub const PCM_A: usize = 0x4B0;
+    pub const PCM_B: usize = 0x4C0;
     /// First address the cart may use for its own data, stack and heap.
     pub const CART: usize = 0x28000;
     /// OAM attribute 0 that hides a sprite.
@@ -85,6 +93,43 @@ pub const reg = struct {
     pub const BLDCNT: Reg16 = .{ .addr = 0x450 };
     pub const BLDALPHA: Reg16 = .{ .addr = 0x452 };
     pub const BLDY: Reg16 = .{ .addr = 0x454 };
+    pub const BG2PA: Reg16 = .{ .addr = 0x420 };
+    pub const BG2PB: Reg16 = .{ .addr = 0x422 };
+    pub const BG2PC: Reg16 = .{ .addr = 0x424 };
+    pub const BG2PD: Reg16 = .{ .addr = 0x426 };
+    pub const BG2X: Reg32 = .{ .addr = 0x428 };
+    pub const BG2Y: Reg32 = .{ .addr = 0x42C };
+    pub const BG3PA: Reg16 = .{ .addr = 0x430 };
+    pub const BG3PB: Reg16 = .{ .addr = 0x432 };
+    pub const BG3PC: Reg16 = .{ .addr = 0x434 };
+    pub const BG3PD: Reg16 = .{ .addr = 0x436 };
+    pub const BG3X: Reg32 = .{ .addr = 0x438 };
+    pub const BG3Y: Reg32 = .{ .addr = 0x43C };
+    pub const SOUND1CNT_L: Reg16 = .{ .addr = 0x460 };
+    pub const SOUND1CNT_H: Reg16 = .{ .addr = 0x462 };
+    pub const SOUND1CNT_X: Reg16 = .{ .addr = 0x464 };
+    pub const SOUND2CNT_L: Reg16 = .{ .addr = 0x468 };
+    pub const SOUND2CNT_H: Reg16 = .{ .addr = 0x46C };
+    pub const SOUND3CNT_L: Reg16 = .{ .addr = 0x470 };
+    pub const SOUND3CNT_H: Reg16 = .{ .addr = 0x472 };
+    pub const SOUND3CNT_X: Reg16 = .{ .addr = 0x474 };
+    pub const SOUND4CNT_L: Reg16 = .{ .addr = 0x478 };
+    pub const SOUND4CNT_H: Reg16 = .{ .addr = 0x47C };
+    pub const SOUNDCNT_L: Reg16 = .{ .addr = 0x480 };
+    pub const SOUNDCNT_H: Reg16 = .{ .addr = 0x482 };
+    pub const SOUNDCNT_X: Reg16 = .{ .addr = 0x484 };
+    pub const PCMA_SAD: Reg16 = .{ .addr = 0x4B0 };
+    pub const PCMA_LEN: Reg16 = .{ .addr = 0x4B2 };
+    pub const PCMA_LOOP: Reg16 = .{ .addr = 0x4B4 };
+    pub const PCMA_RATE: Reg16 = .{ .addr = 0x4B6 };
+    pub const PCMA_CNT: Reg16 = .{ .addr = 0x4B8 };
+    pub const PCMA_POS: Reg16 = .{ .addr = 0x4BA };
+    pub const PCMB_SAD: Reg16 = .{ .addr = 0x4C0 };
+    pub const PCMB_LEN: Reg16 = .{ .addr = 0x4C2 };
+    pub const PCMB_LOOP: Reg16 = .{ .addr = 0x4C4 };
+    pub const PCMB_RATE: Reg16 = .{ .addr = 0x4C6 };
+    pub const PCMB_CNT: Reg16 = .{ .addr = 0x4C8 };
+    pub const PCMB_POS: Reg16 = .{ .addr = 0x4CA };
     pub const KEYS: Reg16 = .{ .addr = 0x700 };
     pub const FRAME: Reg32 = .{ .addr = 0x704 };
     pub const SEED: Reg32 = .{ .addr = 0x708 };
@@ -96,6 +141,10 @@ pub const reg = struct {
 /// `DISPCNT` bits (SPEC.md §6.1).
 pub const dispcnt = struct {
     pub const MODE0: u16 = 0;
+    /// BG0 and BG1 tiled, BG2 affine.
+    pub const MODE1: u16 = 1;
+    /// BG2 and BG3 affine.
+    pub const MODE2: u16 = 2;
     pub const MODE3: u16 = 3;
     pub const MODE4: u16 = 4;
     pub const MODE5: u16 = 5;
@@ -160,6 +209,9 @@ pub const key = struct {
 /// Background map sizes, in tiles.
 pub const MapSize = enum(u16) { s32x32 = 0, s64x32 = 1, s32x64 = 2, s64x64 = 3 };
 
+/// Affine background map sizes, in tiles (SPEC.md §8.4).
+pub const AffineSize = enum(u16) { s16x16 = 0, s32x32 = 1, s64x64 = 2, s128x128 = 3 };
+
 /// A `BGxCNT` value (SPEC.md §6.2).
 pub const BgCnt = struct {
     bits: u16 = 0,
@@ -181,6 +233,14 @@ pub const BgCnt = struct {
     }
     pub fn mosaic(c: BgCnt) BgCnt {
         return .{ .bits = c.bits | 0x40 };
+    }
+    /// Map size of an affine background.
+    pub fn affineSize(c: BgCnt, s: AffineSize) BgCnt {
+        return .{ .bits = (c.bits & 0x3FFF) | (@intFromEnum(s) << 14) };
+    }
+    /// An affine background repeats instead of being transparent outside its map.
+    pub fn wrap(c: BgCnt) BgCnt {
+        return .{ .bits = c.bits | 0x2000 };
     }
 };
 
@@ -213,6 +273,25 @@ pub fn bgTiles(block: usize) []Tile4 {
     std.debug.assert(block < 4);
     const tiles: [*]Tile4 = @ptrFromInt(addr.VRAM + block * 0x4000);
     return tiles[0 .. (4 - block) * 512];
+}
+
+/// An 8bpp tile: 8 rows of 8 bytes. Affine backgrounds always use these.
+pub const Tile8 = [64]u8;
+
+/// 8bpp background tiles from character block `block` (0–3) to the end of
+/// background VRAM.
+pub fn bgTiles8(block: usize) []Tile8 {
+    std.debug.assert(block < 4);
+    const tiles: [*]Tile8 = @ptrFromInt(addr.VRAM + block * 0x4000);
+    return tiles[0 .. (4 - block) * 256];
+}
+
+/// An affine background's map from screen block `block` (0–31) to the end of
+/// background VRAM: one tile index per byte, row-major (SPEC.md §8.4).
+pub fn affineMap(block: usize) []u8 {
+    std.debug.assert(block < 32);
+    const map: [*]u8 = @ptrFromInt(addr.VRAM + block * 0x800);
+    return map[0 .. 0x10000 - block * 0x800];
 }
 
 /// The 1024 4bpp sprite tiles.
@@ -389,6 +468,24 @@ pub const AffineMatrix = struct {
     }
 };
 
+/// Sets affine background `bg` (2 or 3) to matrix `m`, placed so that
+/// texture pixel (`tex_x`, `tex_y`) appears at screen pixel (`scr_x`, `scr_y`).
+/// Rotation and scaling then happen around that point.
+pub fn setBgAffine(bg: usize, m: AffineMatrix, tex_x: i32, tex_y: i32, scr_x: i32, scr_y: i32) void {
+    std.debug.assert(bg == 2 or bg == 3);
+    const at: usize = 0x420 + (bg - 2) * 0x10;
+    const pa: i32 = m.pa;
+    const pb: i32 = m.pb;
+    const pc: i32 = m.pc;
+    const pd: i32 = m.pd;
+    (Reg16{ .addr = at }).write(@bitCast(m.pa));
+    (Reg16{ .addr = at + 2 }).write(@bitCast(m.pb));
+    (Reg16{ .addr = at + 4 }).write(@bitCast(m.pc));
+    (Reg16{ .addr = at + 6 }).write(@bitCast(m.pd));
+    (Reg32{ .addr = at + 8 }).write(@bitCast((tex_x << 8) -% pa *% scr_x -% pb *% scr_y));
+    (Reg32{ .addr = at + 12 }).write(@bitCast((tex_y << 8) -% pc *% scr_x -% pd *% scr_y));
+}
+
 /// OAM: 128 sprites, plus affine matrices stored in the gaps.
 pub const oam = struct {
     pub fn set(i: usize, s: Sprite) void {
@@ -436,6 +533,134 @@ pub const fixed = struct {
     /// cos of `angle` 1/256 turns, in Q14.
     pub fn cos(angle: i32) i32 {
         return sin(angle +% 64);
+    }
+};
+
+/// Sound (SPEC.md §14): four GBA-style channels written through
+/// `reg.SOUND*`, with builders for their fields, and setup.
+///
+///     ad.sound.enable();
+///     ad.reg.SOUND2CNT_L.write(ad.sound.DUTY_50 | ad.sound.envelope(12, 2, false));
+///     ad.reg.SOUND2CNT_H.write(ad.sound.START | ad.sound.rate(440));
+pub const sound = struct {
+    /// Starts (or restarts) a channel; the host clears it.
+    pub const START: u16 = 1 << 15;
+    /// Stops the channel when its length runs out.
+    pub const LENGTH: u16 = 1 << 14;
+
+    pub const DUTY_12: u16 = 0 << 6;
+    pub const DUTY_25: u16 = 1 << 6;
+    pub const DUTY_50: u16 = 2 << 6;
+    pub const DUTY_75: u16 = 3 << 6;
+
+    /// `SOUND3CNT_L`: the wave channel is on.
+    pub const WAVE_ON: u16 = 1 << 7;
+    /// `SOUND3CNT_L`: play bank 1 (or start with it, with `WAVE_64`).
+    pub const WAVE_BANK1: u16 = 1 << 6;
+    /// `SOUND3CNT_L`: play both banks as one 64-sample wave.
+    pub const WAVE_64: u16 = 1 << 5;
+    /// `SOUND3CNT_H` volumes.
+    pub const WAVE_100: u16 = 1 << 13;
+    pub const WAVE_50: u16 = 2 << 13;
+    pub const WAVE_25: u16 = 3 << 13;
+    pub const WAVE_75: u16 = 1 << 15;
+
+    /// Turns sound on with every channel on both sides at full volume.
+    pub fn enable() void {
+        reg.SOUNDCNT_X.write(0x80);
+        reg.SOUNDCNT_L.write(0xFF77);
+        reg.SOUNDCNT_H.write(0x330E);
+    }
+
+    /// Turns sound off; every channel stops.
+    pub fn disable() void {
+        reg.SOUNDCNT_X.write(0);
+    }
+
+    /// The rate field for a square channel playing `hz` (64 Hz and up); the
+    /// wave channel plays an octave lower at the same rate.
+    pub fn rate(hz: u32) u16 {
+        return if (hz < 64) 0 else @intCast(2048 - 131072 / hz);
+    }
+
+    /// `SOUND1CNT_L`: every `time` 128ths of a second (1–7, 0 = off), the
+    /// rate changes by rate >> `shift` (1–7), down if `decrease`.
+    pub fn sweep(time: u16, shift: u16, decrease: bool) u16 {
+        return ((time & 7) << 4) | (shift & 7) | @as(u16, if (decrease) 8 else 0);
+    }
+
+    /// The envelope fields: start at `volume` (0–15), stepping by one every
+    /// `step` 64ths of a second (0 = constant), up if `increase`.
+    pub fn envelope(volume: u16, step: u16, increase: bool) u16 {
+        return ((volume & 15) << 12) | ((step & 7) << 8) | @as(u16, if (increase) 1 << 11 else 0);
+    }
+
+    /// The length field of channels 1, 2 and 4 for `n` 256ths of a second
+    /// (1–64); it only counts with `LENGTH` set. Channel 3 takes 256 − n.
+    pub fn length(n: u16) u16 {
+        return (64 -% n) & 63;
+    }
+
+    /// `SOUND4CNT_H`: noise from a divider (0–7) and shift (0–13), with the
+    /// 7-bit register if `short` (more tonal).
+    pub fn noise(divider: u16, shift: u16, short: bool) u16 {
+        return (divider & 7) | ((shift & 15) << 4) | @as(u16, if (short) 8 else 0);
+    }
+
+    /// Wave RAM: two banks of 16 bytes, each 32 4-bit samples, high nibble first.
+    pub fn waveRam() *[32]u8 {
+        return @ptrFromInt(addr.WAVE_RAM);
+    }
+
+    /// The 28 KB of sample RAM that the sample channels play from.
+    pub fn sampleRam() *[addr.SAMPLE_RAM_SIZE]i8 {
+        return @ptrFromInt(addr.SAMPLE_RAM);
+    }
+
+    /// Which channels are playing: bits 0–3 channels 1–4, bits 4 and 5 sample
+    /// channels A and B, as of the end of the last frame.
+    pub fn status() u16 {
+        return reg.SOUNDCNT_X.read() & 0x3F;
+    }
+};
+
+/// The two sample channels, A (0) and B (1), playing signed 8-bit samples
+/// from `sound.sampleRam()` (SPEC.md §14.6).
+pub const pcm = struct {
+    fn base(ch: usize) usize {
+        std.debug.assert(ch < 2);
+        return if (ch == 0) addr.PCM_A else addr.PCM_B;
+    }
+
+    /// Plays `len` samples from sample RAM offset `start` at `rate` Hz and
+    /// `volume` 0–64, once.
+    pub fn play(ch: usize, start: u16, len: u16, rate: u16, volume: u16) void {
+        const b = base(ch);
+        (Reg16{ .addr = b }).write(start);
+        (Reg16{ .addr = b + 2 }).write(len);
+        (Reg16{ .addr = b + 6 }).write(rate);
+        (Reg16{ .addr = b + 8 }).write(sound.START | @min(volume, 64));
+    }
+
+    /// Like `play`, then repeats from sample `loop_at` until stopped.
+    pub fn playLooped(ch: usize, start: u16, len: u16, loop_at: u16, rate: u16, volume: u16) void {
+        (Reg16{ .addr = base(ch) + 4 }).write(loop_at);
+        play(ch, start, len, rate, volume);
+        const cnt = Reg16{ .addr = base(ch) + 8 };
+        cnt.write(cnt.read() | 1 << 13);
+    }
+
+    pub fn stop(ch: usize) void {
+        (Reg16{ .addr = base(ch) + 8 }).write(1 << 14);
+    }
+
+    /// The playback position, in samples from the start, as of the end of the last frame.
+    pub fn position(ch: usize) u16 {
+        return (Reg16{ .addr = base(ch) + 0xA }).read();
+    }
+
+    pub fn playing(ch: usize) bool {
+        return sound.status() & (@as(u16, 1) << @intCast(4 + ch)) != 0;
     }
 };
 
@@ -569,5 +794,21 @@ test "fixed trig matches float" {
 }
 
 test "metadata text" {
-    try std.testing.expectEqualStrings("spec=0.1\\ntitle=A \\\"B\\\"\\nauthor=me\\n", metaText(.{ .title = "A \"B\"", .author = "me" }));
+    try std.testing.expectEqualStrings("spec=0.2\\ntitle=A \\\"B\\\"\\nauthor=me\\n", metaText(.{ .title = "A \"B\"", .author = "me" }));
+}
+
+test "sound field builders match spec bits" {
+    try std.testing.expectEqual(@as(u16, 1751), sound.rate(440));
+    try std.testing.expectEqual(@as(u16, 0), sound.rate(63));
+    try std.testing.expectEqual(@as(u16, 0x2A), sound.sweep(2, 2, true));
+    try std.testing.expectEqual(@as(u16, 0xC200), sound.envelope(12, 2, false));
+    try std.testing.expectEqual(@as(u16, 0x0900), sound.envelope(0, 1, true));
+    try std.testing.expectEqual(@as(u16, 0), sound.length(64));
+    try std.testing.expectEqual(@as(u16, 63), sound.length(1));
+    try std.testing.expectEqual(@as(u16, 0x1B), sound.noise(3, 1, true));
+}
+
+test "affine background control bits" {
+    const c = (BgCnt{}).screenBlock(8).affineSize(.s32x32).wrap();
+    try std.testing.expectEqual(@as(u16, 8 << 8 | 0x2000 | 1 << 14), c.bits);
 }

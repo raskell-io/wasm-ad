@@ -10,26 +10,31 @@
 // defaults to the version this tool implements. It is for toolchains that
 // cannot emit custom sections themselves (AssemblyScript, TinyGo).
 //
-// `run` boots the cart like a host does (SPEC.md §3) and renders with the
-// reference renderer, player/web/core.wasm (`make player`). Options:
+// `run` boots the cart like a host does (SPEC.md §3) and renders and makes
+// sound with the reference core, player/web/core.wasm (`make player`). Options:
 //   --frames N        frames to run (default 1)
 //   --keys SCRIPT     held buttons per frame, e.g. "0-29:right,30-59:down+b,60:a"
 //   --seed N          value for SEED (default 1)
-//   --hash F,F,...    print a hash of the frame rendered at each listed frame
+//   --hash F,F,...    print a hash of the frame rendered at each listed frame,
+//                     and one of all the sound
 //   --ppm FILE        write the last rendered frame as a PPM image
+//   --wav FILE        write the sound of every frame as a 48 kHz stereo WAV
 //   --core FILE       a different core.wasm
 
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-const SPEC = '0.1';
-const SPEC_VERSION = 0x0001;
+const SPEC = '0.2';
+const SPEC_VERSION = 0x0002;
 const W = 240, H = 160;
 const A = {
   IO: 0x400, PAL_END: 0xC00, OAM: 0xC00, VIDEO_END: 0x19000, SAVE: 0x19000, SAVE_SIZE: 0x8000, CART: 0x28000,
   VCOUNT: 0x406, KEYS: 0x700, FRAME: 0x704, SEED: 0x708, SAVECNT: 0x70C, SAVESTAT: 0x70E, SPEC: 0x710,
+  BG2PA: 0x420, BG2PD: 0x426, BG3PA: 0x430, BG3PD: 0x436,
+  SOUND_REGS: 0x460, SOUND_REGS_END: 0x4D0, SOUND_STATE: 0x780, SOUND_STATE_END: 0x800,
 };
+const SOUND_SAMPLES = 800;
 const KEY = { a: 1, b: 2, select: 4, start: 8, right: 16, left: 32, up: 64, down: 128, r: 256, l: 512 };
 const MAX_CART = 32 * 1024 * 1024;
 
@@ -315,13 +320,16 @@ export async function boot(bytes, { core: corePath, seed = 1, onTrace = () => {}
   const dv = () => new DataView(ex.memory.buffer);
   mem().fill(0, 0, A.CART);
   for (let i = 0; i < 128; i++) dv().setUint16(A.OAM + i * 8, 0x0200, true);
+  for (const a of [A.BG2PA, A.BG2PD, A.BG3PA, A.BG3PD]) dv().setUint16(a, 0x100, true);
   dv().setUint32(A.SEED, seed >>> 0, true);
   dv().setUint16(A.SPEC, SPEC_VERSION, true);
   ex.start?.();
 
-  let frame = 0;
+  let frame = 0, sound = new Int16Array(SOUND_SAMPLES * 2);
   return {
     exports: ex,
+    /** The last frame's sound: 800 stereo pairs of i16, left first. */
+    get sound() { return sound; },
     /** Runs one frame with `keys` held and returns the rendered RGBA8 pixels. */
     frame(keys = 0) {
       dv().setUint16(A.KEYS, keys & 0x3FF, true);
@@ -329,7 +337,12 @@ export async function boot(bytes, { core: corePath, seed = 1, onTrace = () => {}
       dv().setUint16(A.VCOUNT, 160, true);
       ex.update();
       const coreMem = new Uint8Array(core.memory.buffer, core.ad_mem(), core.ad_mem_len());
-      coreMem.set(mem().subarray(0, A.VIDEO_END));
+      coreMem.set(mem().subarray(0, A.CART));
+      core.ad_sound_frame();
+      for (const [from, to] of [[A.SOUND_REGS, A.SOUND_REGS_END], [A.SOUND_STATE, A.SOUND_STATE_END]]) {
+        mem().set(coreMem.subarray(from, to), from);
+      }
+      sound = new Int16Array(core.memory.buffer, core.ad_sound_buffer(), SOUND_SAMPLES * 2).slice();
       for (let y = 0; y < H; y++) {
         if (ex.scanline) {
           dv().setUint16(A.VCOUNT, y, true);
@@ -345,8 +358,24 @@ export async function boot(bytes, { core: corePath, seed = 1, onTrace = () => {}
   };
 }
 
-export function hash(pixels) {
-  return createHash('sha256').update(pixels).digest('hex').slice(0, 16);
+export function hash(...chunks) {
+  const h = createHash('sha256');
+  for (const c of chunks) h.update(new Uint8Array(c.buffer, c.byteOffset, c.byteLength));
+  return h.digest('hex').slice(0, 16);
+}
+
+/** A 48 kHz 16-bit stereo WAV file of `frames` (Int16Arrays from `sound`). */
+export function wav(frames) {
+  const bytes = frames.reduce((n, f) => n + f.byteLength, 0);
+  const out = new DataView(new ArrayBuffer(44 + bytes));
+  const tag = (at, s) => [...s].forEach((c, i) => out.setUint8(at + i, c.charCodeAt(0)));
+  tag(0, 'RIFF'); out.setUint32(4, 36 + bytes, true); tag(8, 'WAVEfmt ');
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 2, true);
+  out.setUint32(24, 48000, true); out.setUint32(28, 48000 * 4, true); out.setUint16(32, 4, true);
+  out.setUint16(34, 16, true); tag(36, 'data'); out.setUint32(40, bytes, true);
+  let at = 44;
+  for (const f of frames) for (const s of f) { out.setInt16(at, s, true); at += 2; }
+  return new Uint8Array(out.buffer);
 }
 
 function ppm(pixels) {
@@ -373,7 +402,7 @@ async function main([cmd, ...args]) {
   const opts = options(args);
   const [file, ...rest] = opts._;
   if (!cmd || !file || !['check', 'meta', 'run'].includes(cmd)) {
-    console.error('usage: wasmad check <cart.wasm>\n       wasmad meta <cart.wasm> [-o out.wasm] key=value...\n       wasmad run <cart.wasm> [--frames N] [--keys SCRIPT] [--seed N] [--hash F,F] [--ppm FILE]');
+    console.error('usage: wasmad check <cart.wasm>\n       wasmad meta <cart.wasm> [-o out.wasm] key=value...\n       wasmad run <cart.wasm> [--frames N] [--keys SCRIPT] [--seed N] [--hash F,F] [--ppm FILE] [--wav FILE]');
     return 2;
   }
   const bytes = new Uint8Array(readFileSync(file));
@@ -411,11 +440,15 @@ async function main([cmd, ...args]) {
   const frames = Number(opts.frames ?? 1);
   const marks = new Set((opts.hash ?? '').split(',').filter(Boolean).map(Number));
   let pixels;
+  const sound = [];
   for (let f = 0; f < frames; f++) {
     pixels = host.frame(keys(f));
+    sound.push(host.sound);
     if (marks.has(f)) console.log(`frame ${f}: ${hash(pixels)}`);
   }
+  if (opts.hash) console.log(`sound: ${hash(...sound)}`);
   if (opts.ppm) writeFileSync(opts.ppm, ppm(pixels));
+  if (opts.wav) writeFileSync(opts.wav, wav(sound));
   return 0;
 }
 

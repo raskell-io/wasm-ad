@@ -27,13 +27,18 @@ export const VRAM_SIZE: usize = 0x18000;
 export const OBJ_VRAM: usize = VRAM + 0x10000;
 export const SAVE: usize = 0x19000;
 export const SAVE_SIZE: usize = 0x8000;
+/** Sample RAM: signed 8-bit samples for the sample channels (SPEC.md §14.6). */
+export const SAMPLE_RAM: usize = 0x21000;
+export const SAMPLE_RAM_SIZE: usize = 0x7000;
+/** Wave RAM: two banks of 16 bytes (SPEC.md §14.5). */
+export const WAVE_RAM: usize = 0x490;
 /** First address the cart may use for its own data, stack and heap. */
 export const CART: usize = 0x28000;
 /** OAM attribute 0 that hides a sprite. */
 export const OBJ_HIDDEN: u16 = 0x0200;
-export const SPEC_VERSION: u16 = 0x0001;
+export const SPEC_VERSION: u16 = 0x0002;
 
-// ---- Registers (SPEC.md §5, §6) ---------------------------------------------
+// ---- Registers (SPEC.md §5, §6, §14) ----------------------------------------
 
 /** Every register address, by its SPEC.md name. Use with `read16`/`write16`. */
 export namespace reg {
@@ -55,6 +60,46 @@ export namespace reg {
   export const SAVECNT: usize = 0x70c;
   export const SAVESTAT: usize = 0x70e;
   export const SPEC: usize = 0x710;
+
+  export const BG2PA: usize = 0x420;
+  export const BG2PB: usize = 0x422;
+  export const BG2PC: usize = 0x424;
+  export const BG2PD: usize = 0x426;
+  export const BG2X: usize = 0x428; // u32
+  export const BG2Y: usize = 0x42c; // u32
+  export const BG3PA: usize = 0x430;
+  export const BG3PB: usize = 0x432;
+  export const BG3PC: usize = 0x434;
+  export const BG3PD: usize = 0x436;
+  export const BG3X: usize = 0x438; // u32
+  export const BG3Y: usize = 0x43c; // u32
+
+  export const SOUND1CNT_L: usize = 0x460;
+  export const SOUND1CNT_H: usize = 0x462;
+  export const SOUND1CNT_X: usize = 0x464;
+  export const SOUND2CNT_L: usize = 0x468;
+  export const SOUND2CNT_H: usize = 0x46c;
+  export const SOUND3CNT_L: usize = 0x470;
+  export const SOUND3CNT_H: usize = 0x472;
+  export const SOUND3CNT_X: usize = 0x474;
+  export const SOUND4CNT_L: usize = 0x478;
+  export const SOUND4CNT_H: usize = 0x47c;
+  export const SOUNDCNT_L: usize = 0x480;
+  export const SOUNDCNT_H: usize = 0x482;
+  export const SOUNDCNT_X: usize = 0x484;
+
+  export const PCMA_SAD: usize = 0x4b0;
+  export const PCMA_LEN: usize = 0x4b2;
+  export const PCMA_LOOP: usize = 0x4b4;
+  export const PCMA_RATE: usize = 0x4b6;
+  export const PCMA_CNT: usize = 0x4b8;
+  export const PCMA_POS: usize = 0x4ba;
+  export const PCMB_SAD: usize = 0x4c0;
+  export const PCMB_LEN: usize = 0x4c2;
+  export const PCMB_LOOP: usize = 0x4c4;
+  export const PCMB_RATE: usize = 0x4c6;
+  export const PCMB_CNT: usize = 0x4c8;
+  export const PCMB_POS: usize = 0x4ca;
 
   /** `BGxCNT` for background 0–3. */
   // @ts-ignore: decorator
@@ -93,6 +138,10 @@ export namespace reg {
 /** `DISPCNT` bits (SPEC.md §6.1). */
 export namespace dispcnt {
   export const MODE0: u16 = 0;
+  /** BG0 and BG1 tiled, BG2 affine. */
+  export const MODE1: u16 = 1;
+  /** BG2 and BG3 affine. */
+  export const MODE2: u16 = 2;
   export const MODE3: u16 = 3;
   export const MODE4: u16 = 4;
   export const MODE5: u16 = 5;
@@ -165,6 +214,14 @@ export enum MapSize {
   S64x64 = 3,
 }
 
+/** Affine background map sizes, in tiles (SPEC.md §8.4). */
+export enum AffineSize {
+  S16x16 = 0,
+  S32x32 = 1,
+  S64x64 = 2,
+  S128x128 = 3,
+}
+
 /** Builders for a `BGxCNT` value (SPEC.md §6.2), e.g. `bgcnt.priority(bgcnt.screenBlock(0, 31), 1)`. */
 export namespace bgcnt {
   // @ts-ignore: decorator
@@ -191,6 +248,16 @@ export namespace bgcnt {
   @inline export function mosaic(c: u16): u16 {
     return c | 0x40;
   }
+  /** Map size of an affine background. */
+  // @ts-ignore: decorator
+  @inline export function affineSize(c: u16, s: AffineSize): u16 {
+    return (c & 0x3fff) | (<u16>s << 14);
+  }
+  /** An affine background repeats instead of being transparent outside its map. */
+  // @ts-ignore: decorator
+  @inline export function wrap(c: u16): u16 {
+    return c | 0x2000;
+  }
 }
 
 /** Packs 8-bit channels into RGB555. */
@@ -215,6 +282,19 @@ export namespace bgcnt {
 @inline export function bgTile(block: i32, index: i32): usize {
   return VRAM + <usize>block * 0x4000 + (<usize>index << 5);
 }
+/** Address of 8bpp background tile `index` counted from character block `block` (0–3). Tiles are 64 bytes;
+ *  affine backgrounds always use these. */
+// @ts-ignore: decorator
+@inline export function bgTile8(block: i32, index: i32): usize {
+  return VRAM + <usize>block * 0x4000 + (<usize>index << 6);
+}
+/** Address of an affine background's map at screen block `block` (0–31): one tile index per byte,
+ *  row-major (SPEC.md §8.4). */
+// @ts-ignore: decorator
+@inline export function affineMap(block: i32): usize {
+  return VRAM + <usize>block * 0x800;
+}
+
 /** Address of 4bpp sprite tile `index` (0–1023). */
 // @ts-ignore: decorator
 @inline export function objTile(index: i32): usize {
@@ -409,6 +489,146 @@ export namespace oam {
     store<u16>(at + 8, <u16>affine.pb(m));
     store<u16>(at + 16, <u16>affine.pc(m));
     store<u16>(at + 24, <u16>affine.pd(m));
+  }
+}
+
+/** Sets affine background `bg` (2 or 3) to matrix `m`, placed so that texture
+ *  pixel (texX, texY) appears at screen pixel (scrX, scrY). Rotation and
+ *  scaling then happen around that point. */
+export function setBgAffine(bg: i32, m: AffineMatrix, texX: i32, texY: i32, scrX: i32, scrY: i32): void {
+  const at = reg.BG2PA + <usize>(bg - 2) * 0x10;
+  const pa = <i32>affine.pa(m), pb = <i32>affine.pb(m), pc = <i32>affine.pc(m), pd = <i32>affine.pd(m);
+  store<u16>(at, <u16>pa);
+  store<u16>(at + 2, <u16>pb);
+  store<u16>(at + 4, <u16>pc);
+  store<u16>(at + 6, <u16>pd);
+  store<u32>(at + 8, <u32>((texX << 8) - pa * scrX - pb * scrY));
+  store<u32>(at + 12, <u32>((texY << 8) - pc * scrX - pd * scrY));
+}
+
+// ---- Sound (SPEC.md §14) -------------------------------------------------------
+
+/** Sound: four GBA-style channels written through `reg.SOUND*`, with
+ *  builders for their fields, and setup:
+ *
+ *    sound.enable();
+ *    write16(reg.SOUND2CNT_L, sound.DUTY_50 | sound.envelope(12, 2, false));
+ *    write16(reg.SOUND2CNT_H, sound.START | sound.rate(440));
+ */
+export namespace sound {
+  /** Starts (or restarts) a channel; the host clears it. */
+  export const START: u16 = 1 << 15;
+  /** Stops the channel when its length runs out. */
+  export const LENGTH: u16 = 1 << 14;
+
+  export const DUTY_12: u16 = 0 << 6;
+  export const DUTY_25: u16 = 1 << 6;
+  export const DUTY_50: u16 = 2 << 6;
+  export const DUTY_75: u16 = 3 << 6;
+
+  /** `SOUND3CNT_L`: the wave channel is on. */
+  export const WAVE_ON: u16 = 1 << 7;
+  /** `SOUND3CNT_L`: play bank 1 (or start with it, with `WAVE_64`). */
+  export const WAVE_BANK1: u16 = 1 << 6;
+  /** `SOUND3CNT_L`: play both banks as one 64-sample wave. */
+  export const WAVE_64: u16 = 1 << 5;
+  /** `SOUND3CNT_H` volumes. */
+  export const WAVE_100: u16 = 1 << 13;
+  export const WAVE_50: u16 = 2 << 13;
+  export const WAVE_25: u16 = 3 << 13;
+  export const WAVE_75: u16 = 1 << 15;
+
+  /** Turns sound on with every channel on both sides at full volume. */
+  export function enable(): void {
+    store<u16>(reg.SOUNDCNT_X, 0x80);
+    store<u16>(reg.SOUNDCNT_L, 0xff77);
+    store<u16>(reg.SOUNDCNT_H, 0x330e);
+  }
+  /** Turns sound off; every channel stops. */
+  export function disable(): void {
+    store<u16>(reg.SOUNDCNT_X, 0);
+  }
+
+  /** The rate field for a square channel playing `hz` (64 Hz and up); the
+   *  wave channel plays an octave lower at the same rate. */
+  // @ts-ignore: decorator
+  @inline export function rate(hz: u32): u16 {
+    return hz < 64 ? 0 : <u16>(2048 - 131072 / hz);
+  }
+  /** `SOUND1CNT_L`: every `time` 128ths of a second (1–7, 0 = off), the
+   *  rate changes by rate >> `shift` (1–7), down if `decrease`. */
+  // @ts-ignore: decorator
+  @inline export function sweep(time: u16, shift: u16, decrease: bool): u16 {
+    return ((time & 7) << 4) | (shift & 7) | (decrease ? 8 : 0);
+  }
+  /** The envelope fields: start at `volume` (0–15), stepping by one every
+   *  `step` 64ths of a second (0 = constant), up if `increase`. */
+  // @ts-ignore: decorator
+  @inline export function envelope(volume: u16, step: u16, increase: bool): u16 {
+    return ((volume & 15) << 12) | ((step & 7) << 8) | (increase ? 1 << 11 : 0);
+  }
+  /** The length field of channels 1, 2 and 4 for `n` 256ths of a second
+   *  (1–64); it only counts with `LENGTH` set. Channel 3 takes 256 − n. */
+  // @ts-ignore: decorator
+  @inline export function length(n: u16): u16 {
+    return (64 - n) & 63;
+  }
+  /** `SOUND4CNT_H`: noise from a divider (0–7) and shift (0–13), with the
+   *  7-bit register if `short` (more tonal). */
+  // @ts-ignore: decorator
+  @inline export function noise(divider: u16, shift: u16, short: bool): u16 {
+    return (divider & 7) | ((shift & 15) << 4) | (short ? 8 : 0);
+  }
+
+  /** Address of wave RAM: two banks of 16 bytes, each 32 4-bit samples, high nibble first. */
+  // @ts-ignore: decorator
+  @inline export function waveRam(): usize {
+    return WAVE_RAM;
+  }
+  /** Address of the 28 KB of sample RAM (signed 8-bit) that the sample channels play from. */
+  // @ts-ignore: decorator
+  @inline export function sampleRam(): usize {
+    return SAMPLE_RAM;
+  }
+  /** Which channels are playing: bits 0–3 channels 1–4, bits 4 and 5 sample
+   *  channels A and B, as of the end of the last frame. */
+  // @ts-ignore: decorator
+  @inline export function status(): u16 {
+    return load<u16>(reg.SOUNDCNT_X) & 0x3f;
+  }
+}
+
+/** The two sample channels, A (0) and B (1), playing signed 8-bit samples
+ *  from sample RAM (SPEC.md §14.6). */
+export namespace pcm {
+  // @ts-ignore: decorator
+  @inline function base(ch: i32): usize {
+    return ch == 0 ? reg.PCMA_SAD : reg.PCMB_SAD;
+  }
+
+  /** Plays `len` samples from sample RAM offset `start` at `rate` Hz and `volume` 0–64, once. */
+  export function play(ch: i32, start: u16, len: u16, rate: u16, volume: u16): void {
+    const b = base(ch);
+    store<u16>(b, start);
+    store<u16>(b + 2, len);
+    store<u16>(b + 6, rate);
+    store<u16>(b + 8, sound.START | (volume < 64 ? volume : 64));
+  }
+  /** Like `play`, then repeats from sample `loopAt` until stopped. */
+  export function playLooped(ch: i32, start: u16, len: u16, loopAt: u16, rate: u16, volume: u16): void {
+    store<u16>(base(ch) + 4, loopAt);
+    play(ch, start, len, rate, volume);
+    store<u16>(base(ch) + 8, load<u16>(base(ch) + 8) | (1 << 13));
+  }
+  export function stop(ch: i32): void {
+    store<u16>(base(ch) + 8, 1 << 14);
+  }
+  /** The playback position, in samples from the start, as of the end of the last frame. */
+  export function position(ch: i32): u16 {
+    return load<u16>(base(ch) + 10);
+  }
+  export function playing(ch: i32): bool {
+    return (sound.status() & (1 << (4 + ch))) != 0;
   }
 }
 

@@ -32,6 +32,12 @@ $('file').addEventListener('change', (e) => {
   e.target.value = '';
 });
 $('reset').addEventListener('click', () => { ad.reset(); showMessage(''); });
+$('sound').addEventListener('click', (e) => {
+  const on = ad.volume === 0;
+  ad.volume = on ? 1 : 0;
+  e.currentTarget.textContent = on ? 'Sound on' : 'Sound off';
+  e.currentTarget.setAttribute('aria-pressed', String(on));
+});
 $('export').addEventListener('click', () => {
   const blob = new Blob([ad.exportSave()], { type: 'application/octet-stream' });
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `${ad.meta.title}.sav` });

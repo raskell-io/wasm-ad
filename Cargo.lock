@@ -4,25 +4,25 @@ version = 4
 
 [[package]]
 name = "hello"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "wasm-ad",
 ]
 
 [[package]]
 name = "twirl"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "wasm-ad",
 ]
 
 [[package]]
 name = "wasm-ad"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "wasm-ad-core",
 ]
 
 [[package]]
 name = "wasm-ad-core"
-version = "0.1.0"
+version = "0.2.0"

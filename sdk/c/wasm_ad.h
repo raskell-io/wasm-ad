@@ -34,7 +34,7 @@ extern "C" {
  * double quotes, backslashes or newlines.
  */
 #define WAD_CART(...) \
-    __asm__(".section \".custom_section.wasm-ad\",\"\",@\n.ascii \"spec=0.1\\n\"\n" __VA_ARGS__)
+    __asm__(".section \".custom_section.wasm-ad\",\"\",@\n.ascii \"spec=0.2\\n\"\n" __VA_ARGS__)
 #define WAD_META(key, value) ".ascii \"" key "=" value "\\n\"\n"
 #define WAD_TITLE(v) WAD_META("title", v)
 #define WAD_AUTHOR(v) WAD_META("author", v)
@@ -55,6 +55,8 @@ extern "C" {
 #define WAD_ADDR_OBJ_VRAM (WAD_ADDR_VRAM + 0x10000u)
 #define WAD_ADDR_SAVE 0x19000u
 #define WAD_SAVE_SIZE 0x8000u
+#define WAD_ADDR_SAMPLE_RAM 0x21000u
+#define WAD_SAMPLE_RAM_SIZE 0x7000u
 /* First address the cart may use for its own data, stack and heap. */
 #define WAD_ADDR_CART 0x28000u
 
@@ -78,6 +80,51 @@ extern "C" {
 #define WAD_BLDCNT WAD_REG16(0x450)
 #define WAD_BLDALPHA WAD_REG16(0x452)
 #define WAD_BLDY WAD_REG16(0x454)
+/* Affine background parameters (§8.4), for bg 2 or 3. */
+#define WAD_BGPA(n) WAD_REG16(0x420 + ((n) - 2) * 0x10)
+#define WAD_BGPB(n) WAD_REG16(0x422 + ((n) - 2) * 0x10)
+#define WAD_BGPC(n) WAD_REG16(0x424 + ((n) - 2) * 0x10)
+#define WAD_BGPD(n) WAD_REG16(0x426 + ((n) - 2) * 0x10)
+#define WAD_BGX(n) WAD_REG32(0x428 + ((n) - 2) * 0x10)
+#define WAD_BGY(n) WAD_REG32(0x42C + ((n) - 2) * 0x10)
+#define WAD_BG2PA WAD_BGPA(2)
+#define WAD_BG2PB WAD_BGPB(2)
+#define WAD_BG2PC WAD_BGPC(2)
+#define WAD_BG2PD WAD_BGPD(2)
+#define WAD_BG2X WAD_BGX(2)
+#define WAD_BG2Y WAD_BGY(2)
+#define WAD_BG3PA WAD_BGPA(3)
+#define WAD_BG3PB WAD_BGPB(3)
+#define WAD_BG3PC WAD_BGPC(3)
+#define WAD_BG3PD WAD_BGPD(3)
+#define WAD_BG3X WAD_BGX(3)
+#define WAD_BG3Y WAD_BGY(3)
+/* Sound (§14). */
+#define WAD_SOUND1CNT_L WAD_REG16(0x460)
+#define WAD_SOUND1CNT_H WAD_REG16(0x462)
+#define WAD_SOUND1CNT_X WAD_REG16(0x464)
+#define WAD_SOUND2CNT_L WAD_REG16(0x468)
+#define WAD_SOUND2CNT_H WAD_REG16(0x46C)
+#define WAD_SOUND3CNT_L WAD_REG16(0x470)
+#define WAD_SOUND3CNT_H WAD_REG16(0x472)
+#define WAD_SOUND3CNT_X WAD_REG16(0x474)
+#define WAD_SOUND4CNT_L WAD_REG16(0x478)
+#define WAD_SOUND4CNT_H WAD_REG16(0x47C)
+#define WAD_SOUNDCNT_L WAD_REG16(0x480)
+#define WAD_SOUNDCNT_H WAD_REG16(0x482)
+#define WAD_SOUNDCNT_X WAD_REG16(0x484)
+#define WAD_PCMA_SAD WAD_REG16(0x4B0)
+#define WAD_PCMA_LEN WAD_REG16(0x4B2)
+#define WAD_PCMA_LOOP WAD_REG16(0x4B4)
+#define WAD_PCMA_RATE WAD_REG16(0x4B6)
+#define WAD_PCMA_CNT WAD_REG16(0x4B8)
+#define WAD_PCMA_POS WAD_REG16(0x4BA)
+#define WAD_PCMB_SAD WAD_REG16(0x4C0)
+#define WAD_PCMB_LEN WAD_REG16(0x4C2)
+#define WAD_PCMB_LOOP WAD_REG16(0x4C4)
+#define WAD_PCMB_RATE WAD_REG16(0x4C6)
+#define WAD_PCMB_CNT WAD_REG16(0x4C8)
+#define WAD_PCMB_POS WAD_REG16(0x4CA)
 #define WAD_KEYS WAD_REG16(0x700)
 #define WAD_FRAME WAD_REG32(0x704)
 #define WAD_SEED WAD_REG32(0x708)
@@ -87,6 +134,8 @@ extern "C" {
 
 /* DISPCNT bits (§6.1). */
 #define WAD_MODE0 0x0000u
+#define WAD_MODE1 0x0001u /* BG0 and BG1 tiled, BG2 affine */
+#define WAD_MODE2 0x0002u /* BG2 and BG3 affine */
 #define WAD_MODE3 0x0003u
 #define WAD_MODE4 0x0004u
 #define WAD_MODE5 0x0005u
@@ -138,6 +187,12 @@ static inline uint16_t wad_blend_alpha(uint16_t eva, uint16_t evb) {
 #define WAD_BG_SIZE_64x32 0x4000u
 #define WAD_BG_SIZE_32x64 0x8000u
 #define WAD_BG_SIZE_64x64 0xC000u
+/* Affine backgrounds (§8.4): map sizes in tiles, and repeat outside the map. */
+#define WAD_BG_WRAP 0x2000u
+#define WAD_BG_AFFINE_16x16 0x0000u
+#define WAD_BG_AFFINE_32x32 0x4000u
+#define WAD_BG_AFFINE_64x64 0x8000u
+#define WAD_BG_AFFINE_128x128 0xC000u
 
 /* KEYS bits (§5). */
 #define WAD_KEY_A 0x0001u
@@ -171,6 +226,20 @@ typedef uint8_t wad_tile4[32];
 /* 4bpp background tiles from character block `block` (0–3). */
 static inline volatile wad_tile4 *wad_bg_tiles(unsigned block) {
     return (volatile wad_tile4 *)(uintptr_t)(WAD_ADDR_VRAM + block * 0x4000u);
+}
+
+/* An 8bpp tile: 8 rows of 8 bytes. Affine backgrounds always use these. */
+typedef uint8_t wad_tile8[64];
+
+/* 8bpp background tiles from character block `block` (0–3). */
+static inline volatile wad_tile8 *wad_bg_tiles8(unsigned block) {
+    return (volatile wad_tile8 *)(uintptr_t)(WAD_ADDR_VRAM + block * 0x4000u);
+}
+
+/* An affine background's map from screen block `block` (0–31): one tile index
+ * per byte, row-major (§8.4). */
+static inline volatile uint8_t *wad_affine_map(unsigned block) {
+    return (volatile uint8_t *)(uintptr_t)(WAD_ADDR_VRAM + block * 0x800u);
 }
 
 /* The 1024 4bpp sprite tiles. */
@@ -320,6 +389,115 @@ static inline wad_affine wad_affine_rotate_scale(int32_t angle, int32_t sx, int3
     m.pd = wad__clamp16(c * 4 / sy);
     return m;
 }
+
+/* Sets affine background `bg` (2 or 3) to matrix `m`, placed so that texture
+ * pixel (tex_x, tex_y) appears at screen pixel (scr_x, scr_y). Rotation and
+ * scaling then happen around that point. */
+static inline void wad_set_bg_affine(unsigned bg, wad_affine m, int32_t tex_x, int32_t tex_y, int32_t scr_x,
+                                     int32_t scr_y) {
+    WAD_BGPA(bg) = (uint16_t)m.pa;
+    WAD_BGPB(bg) = (uint16_t)m.pb;
+    WAD_BGPC(bg) = (uint16_t)m.pc;
+    WAD_BGPD(bg) = (uint16_t)m.pd;
+    WAD_BGX(bg) = (uint32_t)(tex_x * 256 - m.pa * scr_x - m.pb * scr_y);
+    WAD_BGY(bg) = (uint32_t)(tex_y * 256 - m.pc * scr_x - m.pd * scr_y);
+}
+
+/* ---- Sound (§14) ---------------------------------------------------------------- */
+
+/* Starts (or restarts) a channel; the host clears it. */
+#define WAD_SOUND_START 0x8000u
+/* Stops the channel when its length runs out. */
+#define WAD_SOUND_LENGTH 0x4000u
+#define WAD_DUTY_12 0x0000u
+#define WAD_DUTY_25 0x0040u
+#define WAD_DUTY_50 0x0080u
+#define WAD_DUTY_75 0x00C0u
+/* SOUND3CNT_L: on, play bank 1 (first), play both banks as one 64-sample wave. */
+#define WAD_WAVE_ON 0x0080u
+#define WAD_WAVE_BANK1 0x0040u
+#define WAD_WAVE_64 0x0020u
+/* SOUND3CNT_H volumes. */
+#define WAD_WAVE_100 0x2000u
+#define WAD_WAVE_50 0x4000u
+#define WAD_WAVE_25 0x6000u
+#define WAD_WAVE_75 0x8000u
+
+/* Turns sound on with every channel on both sides at full volume. */
+static inline void wad_sound_enable(void) {
+    WAD_SOUNDCNT_X = 0x80;
+    WAD_SOUNDCNT_L = 0xFF77;
+    WAD_SOUNDCNT_H = 0x330E;
+}
+
+/* Turns sound off; every channel stops. */
+static inline void wad_sound_disable(void) { WAD_SOUNDCNT_X = 0; }
+
+/* The rate field for a square channel playing `hz` (64 Hz and up); the wave
+ * channel plays an octave lower at the same rate. */
+static inline uint16_t wad_sound_rate(uint32_t hz) {
+    return hz < 64 ? 0 : (uint16_t)(2048 - 131072 / hz);
+}
+
+/* SOUND1CNT_L: every `time` 128ths of a second (1–7, 0 = off), the rate
+ * changes by rate >> `shift` (1–7), down if `decrease`. */
+static inline uint16_t wad_sound_sweep(uint16_t time, uint16_t shift, bool decrease) {
+    return (uint16_t)(((time & 7) << 4) | (shift & 7) | (decrease ? 8 : 0));
+}
+
+/* The envelope fields: start at `volume` (0–15), stepping by one every `step`
+ * 64ths of a second (0 = constant), up if `increase`. */
+static inline uint16_t wad_sound_envelope(uint16_t volume, uint16_t step, bool increase) {
+    return (uint16_t)(((volume & 15) << 12) | ((step & 7) << 8) | (increase ? 0x800 : 0));
+}
+
+/* The length field of channels 1, 2 and 4 for `n` 256ths of a second (1–64);
+ * it only counts with WAD_SOUND_LENGTH set. Channel 3 takes 256 − n. */
+static inline uint16_t wad_sound_length(uint16_t n) { return (uint16_t)((64 - n) & 63); }
+
+/* SOUND4CNT_H: noise from a divider (0–7) and shift (0–13), with the 7-bit
+ * register if `short_mode` (more tonal). */
+static inline uint16_t wad_sound_noise(uint16_t divider, uint16_t shift, bool short_mode) {
+    return (uint16_t)((divider & 7) | ((shift & 15) << 4) | (short_mode ? 8 : 0));
+}
+
+/* Wave RAM: two banks of 16 bytes, each 32 4-bit samples, high nibble first. */
+#define wad_wave_ram ((volatile uint8_t *)(uintptr_t)0x490)
+
+/* The 28 KB of sample RAM that the sample channels play from. */
+#define wad_sample_ram ((volatile int8_t *)(uintptr_t)WAD_ADDR_SAMPLE_RAM)
+
+/* Which channels are playing: bits 0–3 channels 1–4, bits 4 and 5 sample
+ * channels A and B, as of the end of the last frame. */
+static inline uint16_t wad_sound_status(void) { return (uint16_t)(WAD_SOUNDCNT_X & 0x3F); }
+
+/* Sample channels A (0) and B (1), playing from wad_sample_ram (§14.6). */
+static inline uintptr_t wad__pcm(unsigned ch) { return ch == 0 ? 0x4B0 : 0x4C0; }
+
+/* Plays `len` samples from sample RAM offset `start` at `rate` Hz and
+ * `volume` 0–64, once. */
+static inline void wad_pcm_play(unsigned ch, uint16_t start, uint16_t len, uint16_t rate, uint16_t volume) {
+    uintptr_t b = wad__pcm(ch);
+    WAD_REG16(b) = start;
+    WAD_REG16(b + 2) = len;
+    WAD_REG16(b + 6) = rate;
+    WAD_REG16(b + 8) = (uint16_t)(WAD_SOUND_START | (volume < 64 ? volume : 64));
+}
+
+/* Like wad_pcm_play, then repeats from sample `loop_at` until stopped. */
+static inline void wad_pcm_play_looped(unsigned ch, uint16_t start, uint16_t len, uint16_t loop_at, uint16_t rate,
+                                       uint16_t volume) {
+    WAD_REG16(wad__pcm(ch) + 4) = loop_at;
+    wad_pcm_play(ch, start, len, rate, volume);
+    WAD_REG16(wad__pcm(ch) + 8) = (uint16_t)(WAD_REG16(wad__pcm(ch) + 8) | 0x2000);
+}
+
+static inline void wad_pcm_stop(unsigned ch) { WAD_REG16(wad__pcm(ch) + 8) = 0x4000; }
+
+/* The playback position, in samples from the start, as of the end of the last frame. */
+static inline uint16_t wad_pcm_position(unsigned ch) { return WAD_REG16(wad__pcm(ch) + 10); }
+
+static inline bool wad_pcm_playing(unsigned ch) { return (wad_sound_status() & (1u << (4 + ch))) != 0; }
 
 /* ---- Input, time and entropy (§5, §12) -------------------------------------- */
 

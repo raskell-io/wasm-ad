@@ -1,10 +1,13 @@
-//! Reference renderer for WASM-AD, written to follow SPEC.md section by section.
+//! Reference renderer and sound for WASM-AD, written to follow SPEC.md
+//! section by section.
 //!
 //! The renderer is a pure function of memory: give it the bottom
 //! `VIDEO_END` bytes of a cart's linear memory and a line number, and it
 //! returns that line's pixels. Hosts call it once per line (SPEC.md §3.2).
+//! [`sound::frame`] likewise turns memory into a frame of audio.
 
 pub mod addr;
+pub mod sound;
 
 use addr::*;
 
@@ -49,7 +52,7 @@ pub fn render_line(mem: &[u8], y: usize, out: &mut [u32]) {
 
     let dispcnt = r16(mem, DISPCNT);
     let mode = dispcnt & 7;
-    if dispcnt & 0x80 != 0 || !matches!(mode, 0 | 3 | 4 | 5) {
+    if dispcnt & 0x80 != 0 || mode > 5 {
         out[..SCREEN_W].fill(0xFFFF_FFFF);
         return;
     }
@@ -62,8 +65,13 @@ pub fn render_line(mem: &[u8], y: usize, out: &mut [u32]) {
 
     let windows = Windows::new(mem, dispcnt, y);
     let bgs: [Option<Background>; 4] = std::array::from_fn(|i| {
-        let exists = if mode == 0 { true } else { i == 2 };
-        (exists && dispcnt & (0x100 << i) != 0).then(|| Background::new(mem, i))
+        let exists = match mode {
+            0 => true,
+            1 => i < 3,
+            2 => i >= 2,
+            _ => i == 2,
+        };
+        (exists && dispcnt & (0x100 << i) != 0).then(|| Background::new(mem, i, mode))
     });
 
     let bldcnt = r16(mem, BLDCNT);
@@ -200,6 +208,7 @@ impl Windows {
 
 /// §6.2, §8
 struct Background {
+    affine: Option<Affine>,
     priority: u8,
     char_base: usize,
     screen_base: usize,
@@ -210,11 +219,29 @@ struct Background {
     vofs: usize,
 }
 
+/// §8.4: the matrix and reference point of an affine background.
+struct Affine {
+    pa: i64,
+    pb: i64,
+    pc: i64,
+    pd: i64,
+    x: i64,
+    y: i64,
+    wrap: bool,
+}
+
 impl Background {
-    fn new(mem: &[u8], i: usize) -> Self {
+    fn new(mem: &[u8], i: usize, mode: u16) -> Self {
         let cnt = r16(mem, bgcnt(i));
         let m = r16(mem, MOSAIC);
+        let affine = (mode == 1 && i == 2 || mode == 2).then(|| {
+            let p = |a| r16(mem, a) as i16 as i64;
+            // 28-bit signed 20.8 fixed point.
+            let r = |a| ((u32::from_le_bytes(mem[a..a + 4].try_into().unwrap()) << 4) as i32 >> 4) as i64;
+            Affine { pa: p(bgpa(i)), pb: p(bgpb(i)), pc: p(bgpc(i)), pd: p(bgpd(i)), x: r(bgx(i)), y: r(bgy(i)), wrap: cnt & 0x2000 != 0 }
+        });
         Self {
+            affine,
             priority: (cnt & 3) as u8,
             char_base: ((cnt >> 2) & 3) as usize * 0x4000,
             screen_base: ((cnt >> 8) & 31) as usize * 0x800,
@@ -232,8 +259,11 @@ impl Background {
             None => (x, y),
         };
         let page = if dispcnt & 0x10 != 0 { 0xA000 } else { 0 };
+        if self.affine.is_some() {
+            return self.sample_affine(mem, x, y);
+        }
         match mode {
-            0 => self.sample_text(mem, x, y),
+            0 | 1 => self.sample_text(mem, x, y),
             3 => {
                 let (px, py) = (x + self.hofs, y + self.vofs);
                 (px < 240 && py < 160).then(|| r16(mem, VRAM + (py * 240 + px) * 2) & 0x7FFF)
@@ -253,6 +283,32 @@ impl Background {
                 (px < 160 && py < 128).then(|| r16(mem, VRAM + page + (py * 160 + px) * 2) & 0x7FFF)
             }
             _ => None,
+        }
+    }
+
+    fn sample_affine(&self, mem: &[u8], x: usize, y: usize) -> Option<u16> {
+        let a = self.affine.as_ref()?;
+        let (x, y) = (x as i64, y as i64);
+        let size = 128i64 << self.size;
+        let (mut u, mut v) = ((a.x + a.pa * x + a.pb * y) >> 8, (a.y + a.pc * x + a.pd * y) >> 8);
+        if a.wrap {
+            u = u.rem_euclid(size);
+            v = v.rem_euclid(size);
+        } else if !(0..size).contains(&u) || !(0..size).contains(&v) {
+            return None;
+        }
+        let (u, v) = (u as usize, v as usize);
+        let entry_at = self.screen_base + (v / 8) * (size as usize / 8) + u / 8;
+        if entry_at >= 0x10000 {
+            return None;
+        }
+        let at = self.char_base + mem[VRAM + entry_at] as usize * 64;
+        if at >= 0x10000 {
+            return None;
+        }
+        match mem[VRAM + at + (v % 8) * 8 + u % 8] {
+            0 => None,
+            i => Some(r16(mem, PAL_BG + i as usize * 2) & 0x7FFF),
         }
     }
 
@@ -305,7 +361,7 @@ impl Background {
 fn sprite_line(mem: &[u8], y: usize, objs: &mut [ObjPixel; SCREEN_W], obj_window: &mut [bool; SCREEN_W]) {
     let dispcnt = r16(mem, DISPCNT);
     let one_d = dispcnt & 0x40 != 0;
-    let bitmap = dispcnt & 7 != 0;
+    let bitmap = dispcnt & 7 >= 3;
     let m = r16(mem, MOSAIC);
     let (mh, mv) = (((m >> 8) & 15) as i32 + 1, ((m >> 12) & 15) as i32 + 1);
 
@@ -403,8 +459,9 @@ fn sprite_line(mem: &[u8], y: usize, objs: &mut [ObjPixel; SCREEN_W], obj_window
     }
 }
 
-/// The C ABI used by the web player (player/web): it copies the cart's
-/// video memory into `ad_mem`, then calls `ad_render_line` per line.
+/// The C ABI used by the web player (player/web) and `tools/wasmad.mjs`: they
+/// copy the cart's hardware region into `ad_mem`, call `ad_sound_frame` and
+/// copy the sound registers and state back, then call `ad_render_line` per line.
 #[cfg(feature = "player")]
 mod player {
     use super::*;
@@ -414,8 +471,9 @@ mod player {
     // SAFETY: wasm32-unknown-unknown is single-threaded.
     unsafe impl<T> Sync for Shared<T> {}
 
-    static MEM: Shared<[u8; VIDEO_END]> = Shared(UnsafeCell::new([0; VIDEO_END]));
+    static MEM: Shared<[u8; CART]> = Shared(UnsafeCell::new([0; CART]));
     static FB: Shared<[u32; SCREEN_W * SCREEN_H]> = Shared(UnsafeCell::new([0; SCREEN_W * SCREEN_H]));
+    static SOUND: Shared<[i16; sound::SAMPLES * 2]> = Shared(UnsafeCell::new([0; sound::SAMPLES * 2]));
 
     #[unsafe(no_mangle)]
     pub extern "C" fn ad_mem() -> *mut u8 {
@@ -424,7 +482,7 @@ mod player {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn ad_mem_len() -> u32 {
-        VIDEO_END as u32
+        CART as u32
     }
 
     #[unsafe(no_mangle)]
@@ -438,6 +496,19 @@ mod player {
         // SAFETY: single-threaded; no references outlive this call.
         let (mem, fb) = unsafe { (&*MEM.0.get(), &mut *FB.0.get()) };
         render_line(mem, y, &mut fb[y * SCREEN_W..(y + 1) * SCREEN_W]);
+    }
+
+    /// One frame of sound into `ad_sound_buffer`: 800 stereo i16 pairs.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn ad_sound_frame() {
+        // SAFETY: single-threaded; no references outlive this call.
+        let (mem, out) = unsafe { (&mut *MEM.0.get(), &mut *SOUND.0.get()) };
+        sound::frame(mem, out);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn ad_sound_buffer() -> *const i16 {
+        SOUND.0.get().cast()
     }
 }
 

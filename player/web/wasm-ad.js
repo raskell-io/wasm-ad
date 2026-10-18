@@ -1,5 +1,6 @@
-// WASM-AD host for the browser: implements the host side of SPEC.md and
-// renders with the reference renderer (core.wasm, from the wasm-ad-core crate).
+// WASM-AD host for the browser: implements the host side of SPEC.md, and
+// renders and makes sound with the reference core (core.wasm, from the
+// wasm-ad-core crate).
 //
 //   import { createConsole } from './wasm-ad.js';
 //   const console = await createConsole({ canvas });
@@ -11,8 +12,49 @@ const A = {
   IO: 0x400, PAL_END: 0xC00, VIDEO_END: 0x19000, OAM: 0xC00, SAVE: 0x19000, SAVE_SIZE: 0x8000,
   CART: 0x28000, VCOUNT: 0x406, KEYS: 0x700, FRAME: 0x704, SEED: 0x708,
   SAVECNT: 0x70C, SAVESTAT: 0x70E, SPEC: 0x710,
+  BG2PA: 0x420, BG2PD: 0x426, BG3PA: 0x430, BG3PD: 0x436,
+  SOUND_REGS: 0x460, SOUND_REGS_END: 0x4D0, SOUND_STATE: 0x780, SOUND_STATE_END: 0x800,
 };
-export const SPEC_VERSION = 0x0001;
+export const SPEC_VERSION = 0x0002;
+const SOUND_RATE = 48000;
+
+// Plays the frames of sound the console posts, 800 stereo samples each. It
+// waits for two frames before starting, and drops the oldest when more than
+// six are queued, so latency stays between about 30 and 100 ms.
+const WORKLET = `
+class WasmAdSound extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.queue = [];
+    this.at = 0;
+    this.primed = false;
+    this.port.onmessage = ({ data }) => {
+      if (data === 'clear') { this.queue = []; this.at = 0; this.primed = false; return; }
+      this.queue.push(data);
+      while (this.queue.length > 6) { this.queue.shift(); this.at = 0; }
+    };
+  }
+  process(inputs, [[left, right]]) {
+    if (!this.primed && this.queue.length >= 2) this.primed = true;
+    let i = 0;
+    while (this.primed && i < left.length && this.queue.length) {
+      const f = this.queue[0];
+      for (; i < left.length && this.at < f.length; i++, this.at += 2) {
+        left[i] = f[this.at];
+        right[i] = f[this.at + 1];
+      }
+      if (this.at >= f.length) { this.queue.shift(); this.at = 0; }
+    }
+    if (i < left.length) {
+      left.fill(0, i);
+      right.fill(0, i);
+      this.primed = false;
+    }
+    return true;
+  }
+}
+registerProcessor('wasm-ad-sound', WasmAdSound);
+`;
 export const SAVE_SIZE = A.SAVE_SIZE;
 
 /** `KEYS` bits (SPEC.md §5). */
@@ -66,6 +108,9 @@ export function readMeta(module) {
  * - `keyboard`: listen to the keyboard (default true)
  * - `active()`: whether keyboard input should go to the console right now;
  *   arrow keys only stop scrolling the page while it returns true
+ * - `sound`: play sound (default true). Browsers only allow it after the
+ *   user interacts with the page, so it starts on the first key or click.
+ * - `volume`: 0 to 1 (default 1)
  * - `onError(error)`, `onTrace(message, meta)`
  */
 export async function createConsole({
@@ -73,6 +118,8 @@ export async function createConsole({
   core: coreUrl = new URL('core.wasm', import.meta.url),
   keyboard = true,
   active = () => true,
+  sound = true,
+  volume = 1,
   onError = (e) => console.error(e),
   onTrace = (msg, meta) => console.log(`[${meta.title}]`, msg),
 }) {
@@ -84,6 +131,39 @@ export async function createConsole({
   // `latched` remembers presses until a frame has seen them, so a tap shorter
   // than one frame still reaches the cart.
   let keys = 0, virtualKeys = 0, latched = 0, failed = false, paused = false;
+
+  // Web Audio, created on the first user gesture (autoplay rules).
+  let audio = null; // { ctx, node, gain }
+  async function startAudio() {
+    if (audio || !sound || typeof AudioWorkletNode === 'undefined') return;
+    const ctx = new AudioContext({ sampleRate: SOUND_RATE, latencyHint: 'interactive' });
+    audio = { ctx };
+    try {
+      const url = URL.createObjectURL(new Blob([WORKLET], { type: 'text/javascript' }));
+      await ctx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      const node = new AudioWorkletNode(ctx, 'wasm-ad-sound', { numberOfInputs: 0, outputChannelCount: [2] });
+      const gain = new GainNode(ctx, { gain: volume });
+      node.connect(gain).connect(ctx.destination);
+      Object.assign(audio, { node, gain });
+    } catch (e) {
+      console.warn('no sound:', e);
+    }
+  }
+  const unlock = () => {
+    if (!audio) startAudio();
+    else if (audio.ctx.state === 'suspended') audio.ctx.resume();
+  };
+  for (const type of ['pointerdown', 'keydown', 'touchstart']) addEventListener(type, unlock, { capture: true });
+
+  function postSound() {
+    if (!audio?.node || audio.ctx.state !== 'running') return;
+    const pcm = new Int16Array(core.memory.buffer, core.ad_sound_buffer(), 1600);
+    const f = new Float32Array(1600);
+    for (let i = 0; i < 1600; i++) f[i] = pcm[i] / 32768;
+    audio.node.port.postMessage(f, [f.buffer]);
+  }
+  const clearSound = () => audio?.node?.port.postMessage('clear');
 
   if (keyboard) {
     addEventListener('keydown', (e) => {
@@ -132,6 +212,7 @@ export async function createConsole({
     mem.fill(0, 0, A.CART);
     const dv = new DataView(ex.memory.buffer);
     for (let i = 0; i < 128; i++) dv.setUint16(A.OAM + i * 8, 0x0200, true);
+    for (const a of [A.BG2PA, A.BG2PD, A.BG3PA, A.BG3PD]) dv.setUint16(a, 0x100, true);
     dv.setUint32(A.SEED, crypto.getRandomValues(new Uint32Array(1))[0], true);
     dv.setUint16(A.SPEC, SPEC_VERSION, true);
     const saved = loadSave();
@@ -140,6 +221,7 @@ export async function createConsole({
     cart.exports = ex;
     cart.frame = 0;
     failed = false;
+    clearSound();
     ex.start?.();
   }
 
@@ -155,7 +237,14 @@ export async function createConsole({
 
     // update() may have grown memory, which replaces the buffer.
     const coreMem = new Uint8Array(core.memory.buffer, core.ad_mem(), core.ad_mem_len());
-    coreMem.set(new Uint8Array(ex.memory.buffer, 0, A.VIDEO_END));
+    coreMem.set(new Uint8Array(ex.memory.buffer, 0, A.CART));
+    // Sound for this frame (§14.2); the core updates registers and state.
+    core.ad_sound_frame();
+    const cartMem = new Uint8Array(ex.memory.buffer);
+    for (const [from, to] of [[A.SOUND_REGS, A.SOUND_REGS_END], [A.SOUND_STATE, A.SOUND_STATE_END]]) {
+      cartMem.set(coreMem.subarray(from, to), from);
+    }
+    postSound();
     for (let y = 0; y < H; y++) {
       if (ex.scanline) {
         dv = new DataView(ex.memory.buffer);
@@ -196,6 +285,7 @@ export async function createConsole({
         if (ran) present();
       } catch (e) {
         failed = true;
+        clearSound();
         onError(new Error(`cart crashed: ${e.message}`));
       }
     } else {
@@ -217,7 +307,7 @@ export async function createConsole({
       }
       const meta = readMeta(module);
       const [major, minor] = (meta.spec ?? '').split('.').map(Number);
-      if (major !== 0 || minor > (SPEC_VERSION & 0xFF)) console.warn(`cart targets spec ${meta.spec}; this host implements 0.1`);
+      if (major !== 0 || minor > (SPEC_VERSION & 0xFF)) console.warn(`cart targets spec ${meta.spec}; this host implements 0.2`);
       cart = { module, meta, saveKey: `wasm-ad:${meta.author ?? ''}:${meta.title}` };
       boot();
       return meta;
@@ -225,10 +315,16 @@ export async function createConsole({
     reset() { if (cart) boot(); },
     get meta() { return cart?.meta ?? null; },
     get running() { return Boolean(cart?.exports) && !failed && !paused; },
-    pause() { paused = true; keys = 0; },
+    pause() { paused = true; keys = 0; clearSound(); },
     resume() { paused = false; },
     /** Buttons held by on-screen controls, OR-ed with keyboard and gamepads. */
     setVirtualKeys(mask) { latched |= mask & ~virtualKeys; virtualKeys = mask; },
+    /** Sound volume, 0 to 1. */
+    get volume() { return volume; },
+    set volume(v) {
+      volume = Math.min(1, Math.max(0, v));
+      if (audio?.gain) audio.gain.gain.value = volume;
+    },
     exportSave() { return cart?.exports ? saveBytes() : null; },
     importSave(bytes) {
       if (bytes.length !== A.SAVE_SIZE) throw new Error('a save file must be exactly 32 KB');

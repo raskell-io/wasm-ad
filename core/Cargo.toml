@@ -1,6 +1,6 @@
 [package]
 name = "wasm-ad-core"
-description = "Reference renderer for the WASM-AD fantasy console"
+description = "Reference renderer and sound for the WASM-AD fantasy console"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -15,24 +15,26 @@
 </p>
 
 A cart is one `.wasm` file. It exports `update()`, which the console calls
-60 times a second, and draws by writing registers, palettes, tiles, maps and
-sprites into fixed addresses of its own linear memory, laid out like the
-GBA's. The console turns that memory into a 240×160 frame. Any language that
+60 times a second, and draws and plays sound by writing registers, palettes,
+tiles, maps, sprites and samples into fixed addresses of its own linear
+memory, laid out like the GBA's. The console turns that memory into a
+240×160 frame and 800 samples of stereo sound. Any language that
 compiles to WebAssembly can make a cart without a library; this repo ships
 SDKs for Rust, C and C++, Zig, AssemblyScript and Go.
 
-**[Read the specification →](SPEC.md)** (v0.1 draft)
+**[Read the specification →](SPEC.md)** (v0.2 draft)
 
 | | |
 |---|---|
 | Display | 240×160, 60 fps, RGB555 |
-| Graphics | Mode 0: four tiled backgrounds; modes 3–5: bitmaps |
+| Graphics | Modes 0–2: up to four tiled backgrounds, two of them rotating and scaling; modes 3–5: bitmaps |
 | Tiles | 8×8 at 4bpp (16 banks × 16 colors) or 8bpp (256 colors) |
 | Sprites | 128, 8×8 to 64×64, rotation and scaling |
 | Effects | alpha blending, fades, windows, mosaic, per-scanline raster effects |
+| Sound | 48 kHz stereo: two square waves, a wave channel, noise, two 8-bit sample channels |
 | Input | D-pad, A, B, L, R, Start, Select |
 | Save | 32 KB battery-backed save RAM |
-| Determinism | no clock, one boot seed: replays, save states and netplay come free |
+| Determinism | no clock, one boot seed, integer sound: replays, save states and netplay come free |
 
 ## Try it
 
@@ -55,12 +57,22 @@ Shift = Select. Gamepads work too.
 | C, C++ | [`sdk/c`](sdk/c): one header | Copy `sdk/c/wasm_ad.h` | clang with the WebAssembly backend, wasm-ld |
 | Zig | [`sdk/zig`](sdk/zig) | Path dependency on a checkout or submodule | Zig 0.16 |
 | AssemblyScript | [`sdk/assemblyscript`](sdk/assemblyscript) | `npm install @raskell/wasm-ad` ([npm](https://www.npmjs.com/package/@raskell/wasm-ad)) | `assemblyscript` 0.28 from npm |
-| Go | [`sdk/tinygo`](sdk/tinygo) | `github.com/raskell-io/wasm-ad/sdk/tinygo@v0.1.0` | TinyGo 0.43 |
+| Go | [`sdk/tinygo`](sdk/tinygo) | `github.com/raskell-io/wasm-ad/sdk/tinygo@v0.2.0` | TinyGo 0.43 |
 
 Every SDK has the same starter cart, which renders bit-identical frames in
 all of them (`make sdk-test`), and the same fixed-point trigonometry, so cart
 math is deterministic in any language (SPEC.md §12). Each SDK's README covers
 building the starter and starting a new cart.
+
+Sound is four GBA-style channels and two sample channels, driven through
+registers like everything else (SPEC.md §14):
+
+```rust
+sound::enable();
+reg::SOUND2CNT_L.write(sound::DUTY_50 | sound::envelope(12, 2, false)); // fade out
+reg::SOUND2CNT_H.write(sound::START | sound::rate(440));                // play A4
+pcm::play(0, 0, 2048, 16000, 64); // 2048 samples from sample RAM at 16 kHz
+```
 
 ### Rust
 
@@ -106,7 +118,8 @@ cargo build --release --target wasm32-unknown-unknown
 Off wasm32 the SDK emulates the hardware per thread, so cart logic can be
 unit-tested with `cargo test` and frames rendered with `wasm_ad::host`. See
 `carts/hello` for a complete example, or build the starter with
-`cargo build --release --target wasm32-unknown-unknown -p wasm-ad --example starter`.
+`cargo build --release --target wasm32-unknown-unknown -p wasm-ad --example starter`;
+its sound comes from `wasm_ad::host::sound()` the same way.
 
 ### Checking a cart
 
@@ -115,20 +128,20 @@ unit-tested with `cargo test` and frames rendered with `wasm_ad::host`. See
 ```sh
 node tools/wasmad.mjs check cart.wasm                 # validate against SPEC.md
 node tools/wasmad.mjs meta cart.wasm title="My Cart"  # add the metadata section
-node tools/wasmad.mjs run cart.wasm --frames 120 --keys 0-59:right --ppm out.ppm
+node tools/wasmad.mjs run cart.wasm --frames 120 --keys 0-59:right --ppm out.ppm --wav out.wav
 ```
 
 `check` rejects what a host would refuse and what the spec forbids: other
 imports, missing exports, data or stack in the hardware region, state in
 mutable globals, a start section, missing metadata. `meta` is for toolchains
-that cannot write custom sections. `run` renders frames headlessly with the
-reference renderer (`make player` first).
+that cannot write custom sections. `run` renders frames and sound headlessly
+with the reference core (`make player` first).
 
 ## Repository
 
 ```
 SPEC.md        the standard
-core/          wasm-ad-core: reference renderer, written section by section from the spec
+core/          wasm-ad-core: reference renderer and sound, written section by section from the spec
 sdk/rust/      wasm-ad: Rust SDK for carts, with a native test host
 sdk/c/         C and C++ SDK: wasm_ad.h
 sdk/zig/       Zig SDK
@@ -144,9 +157,8 @@ Carts in the wild: [Rainbow River](https://github.com/raskell-io/rainbow-river).
 
 ## Status
 
-v0.1 covers video, input and save. Audio (four tone/noise channels and two
-PCM channels) is planned for 0.2, along with affine backgrounds (modes 1 and
-2). The spec is a draft: expect breaking changes before 1.0.
+v0.2 covers video (all six modes), sound, input and save. The spec is a
+draft: expect breaking changes before 1.0.
 
 WASM-AD is not affiliated with Nintendo.
 

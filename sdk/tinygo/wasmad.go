@@ -27,10 +27,15 @@ const (
 	AddrObjVRAM = AddrVRAM + 0x10000 // sprite tile 0
 	AddrSave    = 0x19000
 	SaveSize    = 0x8000
+	AddrWaveRAM = 0x00490 // two banks of 16 bytes
+	AddrSamples = 0x21000 // sample RAM (SPEC.md §14.6)
+	SampleSize  = 0x7000
+	AddrPCMA    = 0x004B0 // sample channel A's registers; B is at AddrPCMB
+	AddrPCMB    = 0x004C0
 	AddrCart    = 0x28000 // first address the cart may use
 
 	ObjHidden   = 0x0200 // OAM attribute 0 that hides a sprite
-	SpecVersion = 0x0001
+	SpecVersion = 0x0002
 )
 
 // Reg16 is a 16-bit hardware register.
@@ -59,6 +64,45 @@ const (
 	BLDCNT   Reg16 = 0x450
 	BLDALPHA Reg16 = 0x452
 	BLDY     Reg16 = 0x454
+	BG2PA    Reg16 = 0x420
+	BG2PB    Reg16 = 0x422
+	BG2PC    Reg16 = 0x424
+	BG2PD    Reg16 = 0x426
+	BG2X     Reg32 = 0x428
+	BG2Y     Reg32 = 0x42C
+	BG3PA    Reg16 = 0x430
+	BG3PB    Reg16 = 0x432
+	BG3PC    Reg16 = 0x434
+	BG3PD    Reg16 = 0x436
+	BG3X     Reg32 = 0x438
+	BG3Y     Reg32 = 0x43C
+
+	SOUND1CNT_L Reg16 = 0x460
+	SOUND1CNT_H Reg16 = 0x462
+	SOUND1CNT_X Reg16 = 0x464
+	SOUND2CNT_L Reg16 = 0x468
+	SOUND2CNT_H Reg16 = 0x46C
+	SOUND3CNT_L Reg16 = 0x470
+	SOUND3CNT_H Reg16 = 0x472
+	SOUND3CNT_X Reg16 = 0x474
+	SOUND4CNT_L Reg16 = 0x478
+	SOUND4CNT_H Reg16 = 0x47C
+	SOUNDCNT_L  Reg16 = 0x480
+	SOUNDCNT_H  Reg16 = 0x482
+	SOUNDCNT_X  Reg16 = 0x484
+	PCMA_SAD    Reg16 = AddrPCMA + 0x0
+	PCMA_LEN    Reg16 = AddrPCMA + 0x2
+	PCMA_LOOP   Reg16 = AddrPCMA + 0x4
+	PCMA_RATE   Reg16 = AddrPCMA + 0x6
+	PCMA_CNT    Reg16 = AddrPCMA + 0x8
+	PCMA_POS    Reg16 = AddrPCMA + 0xA
+	PCMB_SAD    Reg16 = AddrPCMB + 0x0
+	PCMB_LEN    Reg16 = AddrPCMB + 0x2
+	PCMB_LOOP   Reg16 = AddrPCMB + 0x4
+	PCMB_RATE   Reg16 = AddrPCMB + 0x6
+	PCMB_CNT    Reg16 = AddrPCMB + 0x8
+	PCMB_POS    Reg16 = AddrPCMB + 0xA
+
 	KEYS     Reg16 = 0x700
 	FRAME    Reg32 = 0x704
 	SEED     Reg32 = 0x708
@@ -79,6 +123,8 @@ func BGVOFS(bg int) Reg16 { return Reg16(0x412 + bg*4) }
 // DISPCNT bits (SPEC.md §6.1).
 const (
 	Mode0       uint16 = 0
+	Mode1       uint16 = 1 // BG0 and BG1 tiled, BG2 affine
+	Mode2       uint16 = 2 // BG2 and BG3 affine
 	Mode3       uint16 = 3
 	Mode4       uint16 = 4
 	Mode5       uint16 = 5
@@ -143,6 +189,14 @@ const (
 	Map64x64 uint16 = 3
 )
 
+// Affine background map sizes, in tiles (SPEC.md §8.4).
+const (
+	Affine16x16   uint16 = 0
+	Affine32x32   uint16 = 1
+	Affine64x64   uint16 = 2
+	Affine128x128 uint16 = 3
+)
+
 // BgCnt is a BGxCNT value (SPEC.md §6.2).
 type BgCnt uint16
 
@@ -152,6 +206,12 @@ func (c BgCnt) ScreenBlock(b uint16) BgCnt { return c&^0x1F00 | BgCnt((b&31)<<8)
 func (c BgCnt) Size(s uint16) BgCnt        { return c&0x3FFF | BgCnt(s<<14) }
 func (c BgCnt) Bpp8() BgCnt                { return c | 0x80 }
 func (c BgCnt) Mosaic() BgCnt              { return c | 0x40 }
+
+// AffineSize sets the map size of an affine background (Affine16x16 …).
+func (c BgCnt) AffineSize(s uint16) BgCnt { return c&0x3FFF | BgCnt(s<<14) }
+
+// Wrap makes an affine background repeat instead of being transparent outside its map.
+func (c BgCnt) Wrap() BgCnt { return c | 0x2000 }
 
 // RGB packs 8-bit channels into RGB555.
 func RGB(r, g, b uint8) uint16 {
@@ -176,6 +236,21 @@ func VRAM() []byte { return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(AddrVRAM
 // the end of background VRAM.
 func BGTiles(block int) []Tile4 {
 	return unsafe.Slice((*Tile4)(unsafe.Pointer(uintptr(AddrVRAM+block*0x4000))), (4-block)*512)
+}
+
+// Tile8 is an 8bpp tile: 8 rows of 8 bytes. Affine backgrounds always use these.
+type Tile8 [64]byte
+
+// BGTiles8 is the 8bpp background tiles from character block block (0–3) to
+// the end of background VRAM.
+func BGTiles8(block int) []Tile8 {
+	return unsafe.Slice((*Tile8)(unsafe.Pointer(uintptr(AddrVRAM+block*0x4000))), (4-block)*256)
+}
+
+// AffineMap is an affine background's map from screen block block (0–31) to
+// the end of background VRAM: one tile index per byte, row-major (SPEC.md §8.4).
+func AffineMap(block int) []byte {
+	return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(AddrVRAM+block*0x800))), 0x10000-block*0x800)
 }
 
 // ObjTiles is the 1024 4bpp sprite tiles.
@@ -344,6 +419,150 @@ func Sin(angle int32) int32 {
 
 // Cos is cos of angle 1/256 turns, in Q14.
 func Cos(angle int32) int32 { return Sin(angle + 64) }
+
+// SetBGAffine sets affine background bg (2 or 3) to matrix m, placed so that
+// texture pixel (texX, texY) appears at screen pixel (scrX, scrY). Rotation
+// and scaling then happen around that point.
+func SetBGAffine(bg int, m AffineMatrix, texX, texY, scrX, scrY int32) {
+	base := 0x420 + (bg-2)*0x10
+	pa, pb, pc, pd := int32(m.PA), int32(m.PB), int32(m.PC), int32(m.PD)
+	Reg16(base).Write(uint16(m.PA))
+	Reg16(base + 2).Write(uint16(m.PB))
+	Reg16(base + 4).Write(uint16(m.PC))
+	Reg16(base + 6).Write(uint16(m.PD))
+	Reg32(base + 8).Write(uint32(texX<<8 - pa*scrX - pb*scrY))
+	Reg32(base + 12).Write(uint32(texY<<8 - pc*scrX - pd*scrY))
+}
+
+// Sound (SPEC.md §14): four GBA-style channels written through the SOUND*
+// registers, with builders for their fields.
+//
+//	wasmad.SoundEnable()
+//	wasmad.SOUND2CNT_L.Write(wasmad.Duty50 | wasmad.SoundEnvelope(12, 2, false))
+//	wasmad.SOUND2CNT_H.Write(wasmad.SoundStart | wasmad.SoundRate(440))
+const (
+	SoundStart  uint16 = 1 << 15 // starts (or restarts) a channel; the host clears it
+	SoundLength uint16 = 1 << 14 // stops the channel when its length runs out
+
+	Duty12 uint16 = 0 << 6
+	Duty25 uint16 = 1 << 6
+	Duty50 uint16 = 2 << 6
+	Duty75 uint16 = 3 << 6
+
+	WaveOn    uint16 = 1 << 7  // SOUND3CNT_L: the wave channel is on
+	WaveBank1 uint16 = 1 << 6  // SOUND3CNT_L: play bank 1 (or start with it, with Wave64)
+	Wave64    uint16 = 1 << 5  // SOUND3CNT_L: play both banks as one 64-sample wave
+	Wave100   uint16 = 1 << 13 // SOUND3CNT_H volumes
+	Wave50    uint16 = 2 << 13
+	Wave25    uint16 = 3 << 13
+	Wave75    uint16 = 1 << 15
+)
+
+// SoundEnable turns sound on with every channel on both sides at full volume.
+func SoundEnable() {
+	SOUNDCNT_X.Write(0x80)
+	SOUNDCNT_L.Write(0xFF77)
+	SOUNDCNT_H.Write(0x330E)
+}
+
+// SoundDisable turns sound off; every channel stops.
+func SoundDisable() { SOUNDCNT_X.Write(0) }
+
+// SoundRate is the rate field for a square channel playing hz (64 Hz and
+// up); the wave channel plays an octave lower at the same rate.
+func SoundRate(hz uint32) uint16 {
+	if hz < 64 {
+		return 0
+	}
+	return uint16(2048 - 131072/hz)
+}
+
+// SoundSweep is a SOUND1CNT_L value: every time 128ths of a second (1–7,
+// 0 = off), the rate changes by rate >> shift (1–7), down if decrease.
+func SoundSweep(time, shift uint16, decrease bool) uint16 {
+	v := (time&7)<<4 | shift&7
+	if decrease {
+		v |= 8
+	}
+	return v
+}
+
+// SoundEnvelope is the envelope fields: start at volume (0–15), stepping by
+// one every step 64ths of a second (0 = constant), up if increase.
+func SoundEnvelope(volume, step uint16, increase bool) uint16 {
+	v := (volume&15)<<12 | (step&7)<<8
+	if increase {
+		v |= 1 << 11
+	}
+	return v
+}
+
+// SoundLengthTicks is the length field of channels 1, 2 and 4 for n 256ths
+// of a second (1–64); it only counts with SoundLength set. Channel 3 takes 256 − n.
+func SoundLengthTicks(n uint16) uint16 { return (64 - n) & 63 }
+
+// SoundNoise is a SOUND4CNT_H value: noise from a divider (0–7) and shift
+// (0–13), with the 7-bit register if short (more tonal).
+func SoundNoise(divider, shift uint16, short bool) uint16 {
+	v := divider&7 | (shift&15)<<4
+	if short {
+		v |= 8
+	}
+	return v
+}
+
+// WaveRAM is two banks of 16 bytes, each 32 4-bit samples, high nibble first.
+func WaveRAM() []byte { return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(AddrWaveRAM))), 32) }
+
+// SampleRAM is the 28 KB of signed 8-bit samples the sample channels play.
+func SampleRAM() []int8 {
+	return unsafe.Slice((*int8)(unsafe.Pointer(uintptr(AddrSamples))), SampleSize)
+}
+
+// SoundStatus reports which channels are playing: bits 0–3 channels 1–4,
+// bits 4 and 5 sample channels A and B, as of the end of the last frame.
+func SoundStatus() uint16 { return SOUNDCNT_X.Read() & 0x3F }
+
+// The two sample channels (SPEC.md §14.6), for the PCM functions.
+const (
+	PCMA = 0
+	PCMB = 1
+)
+
+func pcmBase(ch int) uintptr {
+	if ch == PCMA {
+		return AddrPCMA
+	}
+	return AddrPCMB
+}
+
+// PCMPlay plays len samples from sample RAM offset start at rate Hz and
+// volume 0–64, once, on channel ch (PCMA or PCMB).
+func PCMPlay(ch int, start, len, rate, volume uint16) {
+	b := pcmBase(ch)
+	Reg16(b + 0x0).Write(start)
+	Reg16(b + 0x2).Write(len)
+	Reg16(b + 0x6).Write(rate)
+	Reg16(b + 0x8).Write(SoundStart | min(volume, 64))
+}
+
+// PCMPlayLooped is like PCMPlay, then repeats from sample loopAt until stopped.
+func PCMPlayLooped(ch int, start, len, loopAt, rate, volume uint16) {
+	Reg16(pcmBase(ch) + 0x4).Write(loopAt)
+	PCMPlay(ch, start, len, rate, volume)
+	cnt := Reg16(pcmBase(ch) + 0x8)
+	cnt.Write(cnt.Read() | 1<<13)
+}
+
+// PCMStop stops channel ch.
+func PCMStop(ch int) { Reg16(pcmBase(ch) + 0x8).Write(1 << 14) }
+
+// PCMPosition is the playback position, in samples from the start, as of
+// the end of the last frame.
+func PCMPosition(ch int) uint16 { return Reg16(pcmBase(ch) + 0xA).Read() }
+
+// PCMPlaying reports whether channel ch is playing.
+func PCMPlaying(ch int) bool { return SoundStatus()&(1<<(4+ch)) != 0 }
 
 // Keys returns the buttons held this frame.
 func Keys() uint16 { return KEYS.Read() }

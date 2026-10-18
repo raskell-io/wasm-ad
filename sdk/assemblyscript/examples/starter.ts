@@ -1,16 +1,23 @@
-// The starter cart, the same in every SDK: a scrolling checkerboard blended
-// over a backdrop gradient drawn per scanline, and a spinning star you move
-// with the D-pad (B to go faster, A to toggle mosaic). It uses integer math
-// only, so every language's build renders bit-identical frames.
+// The starter cart, the same in every SDK: a rotating checkerboard (an
+// affine background) blended over a backdrop gradient drawn per scanline,
+// a spinning star you move with the D-pad, and a little tune on all four
+// sound channels. B goes faster and plays a sample; A toggles mosaic with a
+// rising blip. It uses integer math only, so every language's build renders
+// bit-identical frames and sound.
 //
 //   npm run build        -> build/starter.wasm
 
 import {
-  affine, bgcnt, bgTile, blend, buttons, dispcnt, fillTile, fixed, frame, key, layer, oam, objTile, reg,
-  rgb, screenEntry, setBgColor, setObjColor, setScreenEntry, sprite, SpriteSize, trace, write16,
+  affine, affineMap, AffineSize, bgcnt, bgTile8, blend, buttons, dispcnt, fixed, frame, key, layer, oam, objTile,
+  pcm, reg, rgb, setBgAffine, setBgColor, setObjColor, sound, sprite, SpriteSize, trace, write16,
 } from "../assembly/index";
 
-const MAP_BLOCK: u16 = 31;
+const MAP_BLOCK: u16 = 8;
+/** The zap sample's length in sample RAM. */
+const ZAP_LEN: i32 = 2048;
+/** An arpeggio for the square channel and a bass line for the wave channel, in Hz. */
+const NOTES = memory.data<u32>([262, 330, 392, 523, 392, 330, 262, 196]);
+const BASS = memory.data<u32>([65, 55, 44, 49]);
 
 // Cart state lives in linear memory, never in WebAssembly globals (SPEC.md §12).
 @unmanaged
@@ -27,14 +34,15 @@ export function start(): void {
   state.y = 72;
   state.mosaic = false;
 
-  // A checkerboard of two solid tiles on background 0.
+  // A checkerboard of two solid 8bpp tiles on affine background 2, 32×32 tiles.
   setBgColor(1, rgb(255, 255, 255));
   setBgColor(2, rgb(40, 40, 72));
-  fillTile(bgTile(0, 1), 0x11);
-  fillTile(bgTile(0, 2), 0x22);
-  for (let i = 0; i < 1024; i++) {
+  memory.fill(bgTile8(0, 1), 1, 64);
+  memory.fill(bgTile8(0, 2), 2, 64);
+  const map = affineMap(MAP_BLOCK);
+  for (let i = 0; i < 32 * 32; i++) {
     const col = i % 32, row = i / 32;
-    setScreenEntry(MAP_BLOCK, i, screenEntry.make((col / 2 + row / 2) % 2 == 0 ? 1 : 2, 0));
+    store<u8>(map + <usize>i, (col / 2 + row / 2) % 2 == 0 ? 1 : 2);
   }
 
   // A 16×16 star in four 1D-mapped sprite tiles.
@@ -50,10 +58,25 @@ export function start(): void {
     }
   }
 
-  write16(reg.DISPCNT, dispcnt.MODE0 | dispcnt.BG0 | dispcnt.OBJ | dispcnt.OBJ_1D);
-  write16(reg.BLDCNT, blend.cnt(blend.ALPHA, layer.BG0, layer.BACKDROP));
+  write16(reg.DISPCNT, dispcnt.MODE1 | dispcnt.BG2 | dispcnt.OBJ | dispcnt.OBJ_1D);
+  write16(reg.BLDCNT, blend.cnt(blend.ALPHA, layer.BG2, layer.BACKDROP));
   write16(reg.BLDALPHA, blend.alpha(6, 10));
   write16(reg.MOSAIC, 0x3333);
+
+  // A triangle wave for the bass, and a falling zap in sample RAM.
+  for (let i = 0; i < 16; i++) {
+    store<u8>(sound.waveRam() + <usize>i, (level(i * 2) << 4) | level(i * 2 + 1));
+  }
+  for (let i = 0; i < ZAP_LEN; i++) {
+    const s = (fixed.sin((i * i) >> 9) * 127) >> 14;
+    store<i8>(sound.sampleRam() + <usize>i, <i8>((s * (ZAP_LEN - i)) >> 11));
+  }
+  sound.enable();
+}
+
+/** Sample `j` (0–31) of the triangle wave. */
+function level(j: i32): i32 {
+  return j < 16 ? j : 31 - j;
 }
 
 export function update(): void {
@@ -65,13 +88,35 @@ export function update(): void {
   if (buttons.held(key.DOWN)) state.y += speed;
   state.x = min(max(state.x, 0), 240 - 32);
   state.y = min(max(state.y, 0), 160 - 32);
-  if (buttons.pressed(key.A)) state.mosaic = !state.mosaic;
+  if (buttons.pressed(key.A)) {
+    state.mosaic = !state.mosaic;
+    // A rising blip: the sweep raises the pitch until it runs out.
+    write16(reg.SOUND1CNT_L, sound.sweep(2, 2, false));
+    write16(reg.SOUND1CNT_H, sound.DUTY_50 | sound.envelope(12, 2, false));
+    write16(reg.SOUND1CNT_X, sound.START | sound.rate(440));
+  }
+  if (buttons.pressed(key.B)) pcm.play(0, 0, <u16>ZAP_LEN, 16000, 48);
 
   const t = <i32>frame();
-  write16(reg.BGHOFS(0), <u16>(t / 2));
-  write16(reg.BGVOFS(0), <u16>(t / 3));
-  const cnt = bgcnt.priority(bgcnt.screenBlock(0, MAP_BLOCK), 1);
-  write16(reg.BGCNT(0), state.mosaic ? bgcnt.mosaic(cnt) : cnt);
+  // The tune: a note every 16 frames, a hi-hat between them, bass every 64.
+  if (t % 16 == 0) {
+    write16(reg.SOUND2CNT_L, sound.DUTY_25 | sound.envelope(9, 1, false));
+    write16(reg.SOUND2CNT_H, sound.START | sound.rate(load<u32>(NOTES + (<usize>(t / 16 % 8) << 2))));
+  }
+  if (t % 16 == 8) {
+    write16(reg.SOUND4CNT_L, sound.envelope(6, 1, false));
+    write16(reg.SOUND4CNT_H, sound.START | sound.noise(1, 1, false));
+  }
+  if (t % 64 == 0) {
+    write16(reg.SOUND3CNT_L, sound.WAVE_ON);
+    write16(reg.SOUND3CNT_H, sound.WAVE_50 | (256 - 48));
+    write16(reg.SOUND3CNT_X, sound.START | sound.LENGTH | sound.rate(load<u32>(BASS + (<usize>(t / 64 % 4) << 2)) * 2));
+  }
+
+  // Turn once every 1024 frames around the screen centre, scrolling diagonally.
+  const cnt = bgcnt.priority(bgcnt.wrap(bgcnt.affineSize(bgcnt.screenBlock(0, MAP_BLOCK), AffineSize.S32x32)), 1);
+  write16(reg.BGCNT(2), state.mosaic ? bgcnt.mosaic(cnt) : cnt);
+  setBgAffine(2, affine.rotateScaleFixed(t / 4, 256, 256), (t / 2) % 256, (t / 3) % 256, 120, 80);
 
   // Spin a quarter turn every 32 frames while the size pulses ±25%.
   const scale = 256 + ((fixed.sin(t * 3) * 64) >> 14);
