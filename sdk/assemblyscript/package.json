@@ -3,15 +3,41 @@
   "version": "0.1.0",
   "description": "AssemblyScript SDK for writing WASM-AD carts",
   "license": "MIT",
-  "repository": "https://github.com/raskell-io/wasm-ad",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raskell-io/wasm-ad.git",
+    "directory": "sdk/assemblyscript"
+  },
   "type": "module",
   "main": "assembly/index.ts",
   "types": "assembly/index.ts",
-  "files": ["assembly", "asconfig.json", "README.md"],
+  "files": [
+    "assembly",
+    "bin",
+    "asconfig.json",
+    "cart.asconfig.json",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "build": "asc examples/starter.ts --config asconfig.json -o build/starter.wasm && node ../../tools/wasmad.mjs meta build/starter.wasm title=Starter author=raskell.io \"description=The WASM-AD starter cart, in AssemblyScript\""
+    "build": "asc examples/starter.ts --config asconfig.json -o build/starter.wasm && node ../../tools/wasmad.mjs meta build/starter.wasm title=Starter author=raskell.io \"description=The WASM-AD starter cart, in AssemblyScript\"",
+    "prepack": "mkdir -p bin && cp ../../tools/wasmad.mjs bin/wasmad.mjs && cp ../../LICENSE LICENSE"
   },
   "devDependencies": {
     "assemblyscript": "0.28.20"
+  },
+  "keywords": [
+    "wasm-ad",
+    "assemblyscript",
+    "webassembly",
+    "fantasy-console",
+    "gba"
+  ],
+  "homepage": "https://wasmad.raskell.io",
+  "peerDependencies": {
+    "assemblyscript": ">=0.28.0 <0.29.0"
+  },
+  "bin": {
+    "wasmad": "bin/wasmad.mjs"
   }
 }

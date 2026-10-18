@@ -17,13 +17,9 @@ and renders bit-identical frames. Drop `build/starter.wasm` into the player.
 
 ## A new cart
 
-Depend on this package and on `assemblyscript`, import from `wasm-ad/assembly`,
-and copy `asconfig.json` with its `use` entry pointing into the dependency:
-
 ```sh
-npm install assemblyscript@0.28.20 "wasm-ad@file:path/to/wasm-ad/sdk/assemblyscript"
-cp node_modules/wasm-ad/asconfig.json .
-sed -i.bak 's#abort=assembly/index/abort#abort=~lib/wasm-ad/assembly/index/abort#' asconfig.json
+npm install wasm-ad assemblyscript@0.28
+echo '{ "extends": "./node_modules/wasm-ad/cart.asconfig.json" }' > asconfig.json
 ```
 
 ```ts
@@ -32,8 +28,13 @@ import { write16, reg, dispcnt, keys, key } from "wasm-ad/assembly";
 
 ```sh
 npx asc cart.ts --config asconfig.json -o cart.wasm
-node path/to/wasm-ad/tools/wasmad.mjs meta cart.wasm title="My Cart" author=you
+npx wasmad meta cart.wasm title="My Cart" author=you
+npx wasmad check cart.wasm
 ```
+
+`cart.asconfig.json` is the configuration below with `abort` pointing into the
+installed package; extend it rather than copying it. `wasmad` is the cart
+checker from `tools/wasmad.mjs`, shipped with this package.
 
 `asconfig.json` sets what the spec requires:
 

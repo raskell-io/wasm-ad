@@ -19,7 +19,7 @@
 //   --ppm FILE        write the last rendered frame as a PPM image
 //   --core FILE       a different core.wasm
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
@@ -419,7 +419,8 @@ async function main([cmd, ...args]) {
   return 0;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// Run as a command, also through a symlink such as node_modules/.bin/wasmad.
+if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (e) => {
     console.error(`error: ${e.message}`);
     process.exit(1);
