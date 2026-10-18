@@ -1,0 +1,10 @@
+{
+	"inherits": ["wasm-unknown"],
+	"gc": "none",
+	"ldflags": [
+		"--no-stack-first",
+		"--global-base=163840",
+		"-zstack-size=65536",
+		"--initial-memory=262144"
+	]
+}

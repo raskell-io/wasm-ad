@@ -10,4 +10,4 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wasm-ad = { path = "../../sdk" }
+wasm-ad = { path = "../../sdk/rust" }

@@ -1,0 +1,97 @@
+# WASM-AD for AssemblyScript
+
+An AssemblyScript SDK for [WASM-AD](https://github.com/raskell-io/wasm-ad) carts: register
+addresses, typed builders for backgrounds, sprites and affine matrices, input, save RAM and
+`trace`, with no runtime allocation and no mutable globals.
+
+## The starter cart
+
+```sh
+npm install
+npm run build            # build/starter.wasm
+node ../../tools/wasmad.mjs check build/starter.wasm
+```
+
+[`examples/starter.ts`](examples/starter.ts) is the same cart as every other SDK's starter
+and renders bit-identical frames. Drop `build/starter.wasm` into the player.
+
+## A new cart
+
+Depend on this package and on `assemblyscript`, import from `wasm-ad/assembly`,
+and copy `asconfig.json` with its `use` entry pointing into the dependency:
+
+```sh
+npm install assemblyscript@0.28.20 "wasm-ad@file:path/to/wasm-ad/sdk/assemblyscript"
+cp node_modules/wasm-ad/asconfig.json .
+sed -i.bak 's#abort=assembly/index/abort#abort=~lib/wasm-ad/assembly/index/abort#' asconfig.json
+```
+
+```ts
+import { write16, reg, dispcnt, keys, key } from "wasm-ad/assembly";
+```
+
+```sh
+npx asc cart.ts --config asconfig.json -o cart.wasm
+node path/to/wasm-ad/tools/wasmad.mjs meta cart.wasm title="My Cart" author=you
+```
+
+`asconfig.json` sets what the spec requires:
+
+| Option | Why |
+|---|---|
+| `memoryBase: 163840` | Static data starts at 0x28000, above the hardware region (SPEC.md §4). |
+| `initialMemory: 4` | At least 3 pages; 4 leaves room above the data. |
+| `runtime: "stub"` | No garbage collector; carts do not allocate. |
+| `use: abort=assembly/index/abort` | Traps instead of importing `env.abort`; a cart may only import `env.trace`. |
+
+AssemblyScript cannot write custom sections, so `wasmad meta` adds the `wasm-ad` metadata
+(`spec` is filled in). Run `wasmad check` before sharing a cart.
+
+## Rules
+
+A cart exports `update()`, and optionally `start()` and `scanline(y: i32)`. Do the setup in
+`start`, not at the top level of a module, which would run before the host clears the hardware.
+
+**Keep state in linear memory.** AssemblyScript compiles a module-level `let` or `var` to a
+mutable WebAssembly global, which SPEC.md §12 forbids (hosts snapshot linear memory for save
+states and netplay), and `wasmad check` rejects it. Put the cart's state in an
+`@unmanaged` class placed in a static block of memory:
+
+```ts
+@unmanaged
+class State {
+  x: i32;
+  y: i32;
+}
+const state = changetype<State>(memory.data(offsetof<State>()));
+
+export function start(): void {
+  state.x = 112; // memory starts zeroed; set initial values here
+}
+```
+
+`const` values are fine. Avoid `new`, string concatenation, arrays and anything else that
+allocates; use `memory.data` for static buffers.
+
+## API
+
+All values are plain integers; builders take a value and return a new one.
+
+| | |
+|---|---|
+| `read16`, `write16`, `read32`, `write32` | Raw register access, e.g. `write16(reg.DISPCNT, dispcnt.MODE0 \| dispcnt.BG0)` |
+| `reg.*`, `reg.BGCNT(i)`, `reg.BGHOFS(i)`, `reg.BGVOFS(i)` | Register addresses by their SPEC.md names |
+| `dispcnt`, `layer`, `blend`, `key` | Bit constants; `blend.cnt(effect, first, second)`, `blend.alpha(eva, evb)` |
+| `bgcnt.priority/charBlock/screenBlock/size/bpp8/mosaic` | `BGxCNT` builders |
+| `rgb(r, g, b)` | 8-bit channels to RGB555 |
+| `setBgColor(i, c)`, `setObjColor(i, c)` | Palette RAM |
+| `bgTile(block, i)`, `objTile(i)`, `fillTile(addr, byte)` | Addresses of 32-byte 4bpp tiles |
+| `screenBlock(b)`, `setScreenEntry(b, i, e)`, `screenEntry.make/hflip/vflip` | Background maps |
+| `sprite.make(x, y, SpriteSize.S16x16, tile)` then `.bank/.priority/.hflip/.vflip/.semiTransparent/.window/.mosaic/.bpp8/.affine` | Sprites, packed in a `u64` |
+| `oam.set(i, s)`, `oam.hide(i)`, `oam.hideAll()`, `oam.setAffine(slot, m)` | OAM |
+| `affine.rotateScaleFixed(angle, sx, sy)`, `affine.IDENTITY`, `affine.make` | Affine matrices; angle in 1/256 turns, scale in 8.8 |
+| `fixed.sin(a)`, `fixed.cos(a)` | Q14 trigonometry, identical in every SDK |
+| `buttons.update()`, `buttons.held(k)`, `buttons.pressed(k)`, `keys()` | Input |
+| `frame()`, `seed()` | Time and the only entropy source |
+| `saveRam()`, `saveRestored()`, `requestSave()` | 32 KB of save RAM at 0x19000 |
+| `trace(msg)` | UTF-8 to the host's debug log (at most 1 KB) |

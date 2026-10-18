@@ -439,10 +439,14 @@ the stack at address 0 by default. Pass
 which puts data at 0x28000 and the stack above it.
 
 **C** (clang, `--target=wasm32`, `-nostdlib`, `-Wl,--no-entry`):
-`-Wl,--no-stack-first -Wl,--global-base=163840 -Wl,--export=update`.
+`-Wl,--global-base=163840 -Wl,-z,stack-size=65536 -Wl,--export=update`.
+wasm-ld places the stack after the data unless given `--stack-first`.
 
 Other languages need the equivalent of `--global-base=163840` and a stack
-that is not placed first.
+that is not placed first. Toolchains that cannot write custom sections can add
+the metadata after linking. The repository's `sdk/` directory has SDKs and
+build setups for Rust, C and C++, Zig, AssemblyScript and Go (TinyGo), and
+`tools/wasmad.mjs check` validates a cart against this specification.
 
 ## 14. Reserved for future versions
 

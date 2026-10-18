@@ -387,6 +387,45 @@ impl AffineMatrix {
         let fx = |v: f32| (v * 256.0).round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
         Self { pa: fx(cos / sx), pb: fx(-sin / sx), pc: fx(sin / sy), pd: fx(cos / sy) }
     }
+
+    /// Like [`rotate_scale`](Self::rotate_scale) in integer math, so every
+    /// SDK computes the same matrix: `angle` in 1/256 turns (see [`fixed`]),
+    /// scale factors in 8.8 fixed point (256 = 1×, must be nonzero).
+    pub const fn rotate_scale_fixed(angle: i32, sx: i32, sy: i32) -> Self {
+        let (sin, cos) = (fixed::sin(angle), fixed::cos(angle));
+        const fn fx(v: i32) -> i16 {
+            if v < i16::MIN as i32 { i16::MIN } else if v > i16::MAX as i32 { i16::MAX } else { v as i16 }
+        }
+        Self { pa: fx(cos * 4 / sx), pb: fx(-sin * 4 / sx), pc: fx(sin * 4 / sy), pd: fx(cos * 4 / sy) }
+    }
+}
+
+/// Fixed-point trigonometry shared by all WASM-AD SDKs, so carts in any
+/// language compute bit-identical results (SPEC.md §12).
+pub mod fixed {
+    /// sin over a quarter turn in 1/256-turn steps, scaled by 16384 (Q14).
+    pub const SIN_Q14: [i32; 65] = [
+        0, 402, 804, 1205, 1606, 2006, 2404, 2801, 3196, 3590, 3981, 4370, 4756, 5139, 5520, 5897, 6270, 6639, 7005,
+        7366, 7723, 8076, 8423, 8765, 9102, 9434, 9760, 10080, 10394, 10702, 11003, 11297, 11585, 11866, 12140, 12406,
+        12665, 12916, 13160, 13395, 13623, 13842, 14053, 14256, 14449, 14635, 14811, 14978, 15137, 15286, 15426, 15557,
+        15679, 15791, 15893, 15986, 16069, 16143, 16207, 16261, 16305, 16340, 16364, 16379, 16384,
+    ];
+
+    /// sin of `angle` 1/256 turns (any integer; only the low 8 bits count), in Q14.
+    pub const fn sin(angle: i32) -> i32 {
+        let a = (angle & 255) as usize;
+        match a {
+            0..64 => SIN_Q14[a],
+            64..128 => SIN_Q14[128 - a],
+            128..192 => -SIN_Q14[a - 128],
+            _ => -SIN_Q14[256 - a],
+        }
+    }
+
+    /// cos of `angle` 1/256 turns, in Q14.
+    pub const fn cos(angle: i32) -> i32 {
+        sin(angle + 64)
+    }
 }
 
 /// Buttons held this frame.
@@ -578,6 +617,18 @@ mod tests {
         let fb = host::render();
         assert_eq!(fb[20 * SCREEN_W + 10], wasm_ad_core::rgba(rgb(255, 0, 0)));
         assert_eq!(fb[0], wasm_ad_core::rgba(rgb(0, 0, 255)));
+    }
+
+    #[test]
+    fn fixed_trig_matches_float() {
+        for a in 0..256 {
+            let t = a as f64 * std::f64::consts::TAU / 256.0;
+            assert!((fixed::sin(a) as f64 / 16384.0 - t.sin()).abs() < 1e-4, "sin {a}");
+            assert!((fixed::cos(a) as f64 / 16384.0 - t.cos()).abs() < 1e-4, "cos {a}");
+        }
+        assert_eq!(fixed::sin(-64), -16384);
+        assert_eq!(AffineMatrix::rotate_scale_fixed(0, 256, 256), AffineMatrix::IDENTITY);
+        assert_eq!(AffineMatrix::rotate_scale_fixed(64, 512, 256), AffineMatrix { pa: 0, pb: -128, pc: 256, pd: 0 });
     }
 
     #[test]

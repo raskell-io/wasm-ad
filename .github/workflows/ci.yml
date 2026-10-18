@@ -20,3 +20,27 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
       - run: make all
+
+  # Every SDK's starter cart, checked against the spec and against each other.
+  sdks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - uses: acifani/setup-tinygo@v2
+        with:
+          tinygo-version: 0.43.0
+      - run: sudo apt-get update && sudo apt-get install -y clang lld
+      - run: cd sdk/zig && zig build test
+      - run: make sdk-test
+        env:
+          REQUIRE_ALL: 1

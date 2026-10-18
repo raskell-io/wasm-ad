@@ -1,0 +1,17 @@
+{
+  "name": "wasm-ad",
+  "version": "0.1.0",
+  "description": "AssemblyScript SDK for writing WASM-AD carts",
+  "license": "MIT",
+  "repository": "https://github.com/raskell-io/wasm-ad",
+  "type": "module",
+  "main": "assembly/index.ts",
+  "types": "assembly/index.ts",
+  "files": ["assembly", "asconfig.json", "README.md"],
+  "scripts": {
+    "build": "asc examples/starter.ts --config asconfig.json -o build/starter.wasm && node ../../tools/wasmad.mjs meta build/starter.wasm title=Starter author=raskell.io \"description=The WASM-AD starter cart, in AssemblyScript\""
+  },
+  "devDependencies": {
+    "assemblyscript": "0.28.20"
+  }
+}

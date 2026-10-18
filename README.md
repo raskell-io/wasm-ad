@@ -18,8 +18,8 @@ A cart is one `.wasm` file. It exports `update()`, which the console calls
 60 times a second, and draws by writing registers, palettes, tiles, maps and
 sprites into fixed addresses of its own linear memory, laid out like the
 GBA's. The console turns that memory into a 240×160 frame. Any language that
-compiles to WebAssembly can make a cart without a library; this repo ships a
-Rust SDK.
+compiles to WebAssembly can make a cart without a library; this repo ships
+SDKs for Rust, C and C++, Zig, AssemblyScript and Go.
 
 **[Read the specification →](SPEC.md)** (v0.1 draft)
 
@@ -47,7 +47,22 @@ The player at `player/web` loads any cart by file picker, drag and drop, or
 `?cart=<url>`. Keys: arrows, X = A, Z = B, A = L, S = R, Enter = Start,
 Shift = Select. Gamepads work too.
 
-## Writing a cart in Rust
+## Writing a cart
+
+| Language | SDK | Toolchain |
+|---|---|---|
+| Rust | [`sdk/rust`](sdk/rust), below | `rustup target add wasm32-unknown-unknown` |
+| C, C++ | [`sdk/c`](sdk/c): one header | clang with the WebAssembly backend, wasm-ld |
+| Zig | [`sdk/zig`](sdk/zig) | Zig 0.16 |
+| AssemblyScript | [`sdk/assemblyscript`](sdk/assemblyscript) | `assemblyscript` 0.28 from npm |
+| Go | [`sdk/tinygo`](sdk/tinygo) | TinyGo 0.43 |
+
+Every SDK has the same starter cart, which renders bit-identical frames in
+all of them (`make sdk-test`), and the same fixed-point trigonometry, so cart
+math is deterministic in any language (SPEC.md §12). Each SDK's README covers
+building the starter and starting a new cart.
+
+### Rust
 
 ```toml
 # Cargo.toml
@@ -90,14 +105,36 @@ cargo build --release --target wasm32-unknown-unknown
 
 Off wasm32 the SDK emulates the hardware per thread, so cart logic can be
 unit-tested with `cargo test` and frames rendered with `wasm_ad::host`. See
-`carts/hello` for a complete example.
+`carts/hello` for a complete example, or build the starter with
+`cargo build --release --target wasm32-unknown-unknown -p wasm-ad --example starter`.
+
+### Checking a cart
+
+`tools/wasmad.mjs` needs only Node 18+ and works on carts from any language:
+
+```sh
+node tools/wasmad.mjs check cart.wasm                 # validate against SPEC.md
+node tools/wasmad.mjs meta cart.wasm title="My Cart"  # add the metadata section
+node tools/wasmad.mjs run cart.wasm --frames 120 --keys 0-59:right --ppm out.ppm
+```
+
+`check` rejects what a host would refuse and what the spec forbids: other
+imports, missing exports, data or stack in the hardware region, state in
+mutable globals, a start section, missing metadata. `meta` is for toolchains
+that cannot write custom sections. `run` renders frames headlessly with the
+reference renderer (`make player` first).
 
 ## Repository
 
 ```
 SPEC.md        the standard
 core/          wasm-ad-core: reference renderer, written section by section from the spec
-sdk/           wasm-ad: Rust SDK for carts, with a native test host
+sdk/rust/      wasm-ad: Rust SDK for carts, with a native test host
+sdk/c/         C and C++ SDK: wasm_ad.h
+sdk/zig/       Zig SDK
+sdk/assemblyscript/  AssemblyScript SDK
+sdk/tinygo/    Go SDK, for TinyGo
+tools/         wasmad.mjs: check, add metadata to, and run carts from the command line
 player/web/    browser player; wasm-ad.js is the embeddable console
 carts/twirl/   a spinning-stick maze game: affine sprite, parallax, blending, save RAM
 carts/hello/   example cart: raster gradient, blending, affine sprite, mosaic

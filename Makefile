@@ -2,7 +2,7 @@ TARGET := target/wasm32-unknown-unknown/release
 PORT ?= 8643
 CARTS := twirl hello
 
-.PHONY: all player carts serve test clean
+.PHONY: all player carts serve test sdk-test clean
 
 all: player carts
 
@@ -23,6 +23,10 @@ serve: all
 
 test:
 	cargo test
+
+# Every SDK's starter cart, checked against the spec and against each other.
+sdk-test: player
+	sdk/test.sh
 
 clean:
 	cargo clean
