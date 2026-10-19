@@ -1,0 +1,22 @@
+{
+  "about": "The conformance tests: which cart, how to play it, and which frames to hash. `node conformance/run.mjs --update` turns this into replays/ and expected.json using the reference core.",
+  "tests": [
+    { "name": "tiles", "cart": "tiles", "sections": ["6.1", "6.2", "6.4", "8.1", "8.2", "10.2"], "frames": 180, "hash": "scenes" },
+    { "name": "effects", "cart": "effects", "sections": ["6.3", "6.5", "9.1", "10"], "frames": 180, "hash": "scenes" },
+    { "name": "sprites", "cart": "sprites", "sections": ["9", "6.4"], "frames": 180, "hash": "scenes" },
+    { "name": "bitmap", "cart": "bitmap", "sections": ["8.3", "9"], "frames": 120, "hash": "scenes" },
+    { "name": "affine", "cart": "affine", "sections": ["6.1", "6.2", "8.4", "3.2"], "frames": 150, "hash": "scenes" },
+    { "name": "sound", "cart": "sound", "sections": ["14.1", "14.2", "14.3", "14.4", "14.5", "14.7", "14.8"], "frames": 180, "hash": "scenes" },
+    { "name": "samples", "cart": "samples", "sections": ["14.6", "14.7"], "frames": 120, "hash": "scenes" },
+    {
+      "name": "system", "cart": "system", "sections": ["3.1", "3.2", "5", "11", "12"], "frames": 120, "hash": "every 5",
+      "seed": 1,
+      "keys": "0-9:a+right,10-29:b@2+up@3+start,30-49:l@4+r+select@2,50-79:down+left@2+a@3+b@4,80-119:up+right@4",
+      "pads": "0-29:1,30-59:15,60-89:5,90-119:9"
+    },
+    {
+      "name": "system-saved", "cart": "system", "sections": ["3.1", "11", "12"], "frames": 60, "hash": "every 5",
+      "seed": 3735928559, "save": "pattern", "keys": "0-59:a"
+    }
+  ]
+}

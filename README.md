@@ -22,7 +22,7 @@ memory, laid out like the GBA's. The console turns that memory into a
 compiles to WebAssembly can make a cart without a library; this repo ships
 SDKs for Rust, C and C++, Zig, AssemblyScript and Go.
 
-**[Read the specification →](SPEC.md)** (v0.2 draft)
+**[Read the specification →](SPEC.md)** (v0.3 draft) · [file formats](FORMATS.md)
 
 | | |
 |---|---|
@@ -32,9 +32,9 @@ SDKs for Rust, C and C++, Zig, AssemblyScript and Go.
 | Sprites | 128, 8×8 to 64×64, rotation and scaling |
 | Effects | alpha blending, fades, windows, mosaic, per-scanline raster effects |
 | Sound | 48 kHz stereo: two square waves, a wave channel, noise, two 8-bit sample channels |
-| Input | D-pad, A, B, L, R, Start, Select |
+| Input | D-pad, A, B, L, R, Start, Select; up to four players |
 | Save | 32 KB battery-backed save RAM |
-| Determinism | no clock, one boot seed, integer sound: replays, save states and netplay come free |
+| Determinism | no clock, one boot seed, integer sound: replays and save states that work in any host |
 
 ## Try it
 
@@ -57,7 +57,7 @@ Shift = Select. Gamepads work too.
 | C, C++ | [`sdk/c`](sdk/c): one header | Copy `sdk/c/wasm_ad.h` | clang with the WebAssembly backend, wasm-ld |
 | Zig | [`sdk/zig`](sdk/zig) | Path dependency on a checkout or submodule | Zig 0.16 |
 | AssemblyScript | [`sdk/assemblyscript`](sdk/assemblyscript) | `npm install @raskell/wasm-ad` ([npm](https://www.npmjs.com/package/@raskell/wasm-ad)) | `assemblyscript` 0.28 from npm |
-| Go | [`sdk/tinygo`](sdk/tinygo) | `github.com/raskell-io/wasm-ad/sdk/tinygo@v0.2.0` | TinyGo 0.43 |
+| Go | [`sdk/tinygo`](sdk/tinygo) | `github.com/raskell-io/wasm-ad/sdk/tinygo@v0.3.0` | TinyGo 0.43 |
 
 Every SDK has the same starter cart, which renders bit-identical frames in
 all of them (`make sdk-test`), and the same fixed-point trigonometry, so cart
@@ -72,6 +72,16 @@ sound::enable();
 reg::SOUND2CNT_L.write(sound::DUTY_50 | sound::envelope(12, 2, false)); // fade out
 reg::SOUND2CNT_H.write(sound::START | sound::rate(440));                // play A4
 pcm::play(0, 0, 2048, 16000, 64); // 2048 samples from sample RAM at 16 kHz
+```
+
+Players 2–4 read their buttons from `KEYS2`–`KEYS4`, and `PADS` says who has a
+controller (SPEC.md §5):
+
+```rust
+if connected(2) {
+    p2.update_for(2);
+    if p2.held(key::RIGHT) { x2 += 1 }
+}
 ```
 
 ### Rust
@@ -129,26 +139,34 @@ its sound comes from `wasm_ad::host::sound()` the same way.
 node tools/wasmad.mjs check cart.wasm                 # validate against SPEC.md
 node tools/wasmad.mjs meta cart.wasm title="My Cart"  # add the metadata section
 node tools/wasmad.mjs run cart.wasm --frames 120 --keys 0-59:right --ppm out.ppm --wav out.wav
+node tools/wasmad.mjs icon cart.wasm icon.png         # a 32×32 icon, at most 15 colors
+node tools/wasmad.mjs run cart.wasm --frames 600 --keys 0-99:a+left@2 --record run.wadreplay
+node tools/wasmad.mjs run cart.wasm --replay run.wadreplay --save-state end.wadstate
 ```
 
 `check` rejects what a host would refuse and what the spec forbids: other
 imports, missing exports, data or stack in the hardware region, state in
 mutable globals, a start section, missing metadata. `meta` is for toolchains
 that cannot write custom sections. `run` renders frames and sound headlessly
-with the reference core (`make player` first).
+with the reference core (`make player` first); it records and plays replays
+and writes and loads save states in the formats of [FORMATS.md](FORMATS.md),
+which the web player reads and writes too. `a@2` in a key script is player
+2's A button.
 
 ## Repository
 
 ```
 SPEC.md        the standard
+FORMATS.md     replay and save state files, for hosts
 core/          wasm-ad-core: reference renderer and sound, written section by section from the spec
 sdk/rust/      wasm-ad: Rust SDK for carts, with a native test host
 sdk/c/         C and C++ SDK: wasm_ad.h
 sdk/zig/       Zig SDK
 sdk/assemblyscript/  AssemblyScript SDK
 sdk/tinygo/    Go SDK, for TinyGo
-tools/         wasmad.mjs: check, add metadata to, and run carts from the command line
+tools/         wasmad.mjs: check carts, set metadata and icons, run, record and replay
 player/web/    browser player; wasm-ad.js is the embeddable console
+conformance/   host conformance suite: test carts, replays and expected hashes
 carts/twirl/   a spinning-stick maze game: affine sprite, parallax, blending, save RAM
 carts/hello/   example cart: raster gradient, blending, affine sprite, mosaic
 ```
@@ -157,8 +175,10 @@ Carts in the wild: [Rainbow River](https://github.com/raskell-io/rainbow-river).
 
 ## Status
 
-v0.2 covers video (all six modes), sound, input and save. The spec is a
-draft: expect breaking changes before 1.0.
+v0.3 covers video (all six modes), sound, input for up to four players,
+save RAM, cart icons, and replay and save state files that move between
+hosts. `make host-test` runs the [host conformance suite](conformance). The
+spec is a draft: expect breaking changes before 1.0.
 
 WASM-AD is not affiliated with Nintendo.
 

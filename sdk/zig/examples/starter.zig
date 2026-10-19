@@ -2,8 +2,9 @@
 //! affine background) blended over a backdrop gradient drawn per scanline,
 //! a spinning star you move with the D-pad, and a little tune on all four
 //! sound channels. B goes faster and plays a sample; A toggles mosaic with a
-//! rising blip. It uses integer math only, so every language's build renders
-//! bit-identical frames and sound.
+//! rising blip. A second controller brings in a blue star for player 2. It
+//! uses integer math only, so every language's build renders bit-identical
+//! frames and sound.
 //!
 //!     zig build        # zig-out/bin/starter.wasm
 
@@ -31,6 +32,9 @@ var state: struct {
     x: i32 = 112,
     y: i32 = 72,
     mosaic: bool = false,
+    p2: ad.Buttons = .{},
+    x2: i32 = 40,
+    y2: i32 = 72,
 } = .{};
 
 export fn start() void {
@@ -53,6 +57,9 @@ export fn start() void {
     const obj = ad.objPalette();
     obj[1] = ad.rgb(255, 216, 64);
     obj[2] = ad.rgb(232, 96, 32);
+    // Player 2's star: the same tiles in palette bank 1.
+    obj[17] = ad.rgb(96, 200, 255);
+    obj[18] = ad.rgb(40, 80, 220);
     const star = ad.objTiles();
     var y: i32 = 0;
     while (y < 16) : (y += 1) {
@@ -141,6 +148,20 @@ export fn update() void {
     ad.oam.setAffine(0, .rotateScaleFixed(t *% 2, scale, scale));
     const star = ad.Sprite.init(s.x, s.y, .s16x16, 0).affine(0, true);
     ad.oam.set(0, if (s.mosaic) star.mosaic() else star);
+
+    // Player 2 joins when a second controller connects (SPEC.md §5).
+    if (ad.connected(2)) {
+        s.p2.updateFor(2);
+        if (s.p2.held(ad.key.LEFT)) s.x2 -= 1;
+        if (s.p2.held(ad.key.RIGHT)) s.x2 += 1;
+        if (s.p2.held(ad.key.UP)) s.y2 -= 1;
+        if (s.p2.held(ad.key.DOWN)) s.y2 += 1;
+        s.x2 = @max(0, @min(s.x2, 240 - 32));
+        s.y2 = @max(0, @min(s.y2, 160 - 32));
+        ad.oam.set(1, ad.Sprite.init(s.x2, s.y2, .s16x16, 0).bank(1).affine(0, true));
+    } else {
+        ad.oam.hide(1);
+    }
 }
 
 /// Raster effect: a new backdrop color on every line.

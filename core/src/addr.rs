@@ -91,7 +91,8 @@ pub const PCM_LOOP: usize = 0x4;
 pub const PCM_RATE: usize = 0x6;
 pub const PCM_CNT: usize = 0x8;
 pub const PCM_POS: usize = 0xA;
-/// Host-owned sound state, so a snapshot of memory captures it (SPEC.md §14.8).
+/// Host-owned sound state, so a snapshot of memory captures it; its layout
+/// is fixed by SPEC.md §14.8.
 pub const SOUND_STATE: usize = 0x780;
 pub const SOUND_STATE_SIZE: usize = 0x80;
 /// The sound registers, which the host reads and writes back each frame.
@@ -105,9 +106,15 @@ pub const SEED: usize = 0x708;
 pub const SAVECNT: usize = 0x70C;
 pub const SAVESTAT: usize = 0x70E;
 pub const SPEC: usize = 0x710;
+/// Buttons held by players 2–4 (`KEYS` is player 1).
+pub const KEYS2: usize = 0x712;
+pub const KEYS3: usize = 0x714;
+pub const KEYS4: usize = 0x716;
+/// Bits 0–3: players 1–4 have a controller.
+pub const PADS: usize = 0x718;
 
 /// Version this crate implements, as major × 256 + minor.
-pub const SPEC_VERSION: u16 = 0x0002;
+pub const SPEC_VERSION: u16 = 0x0003;
 
 /// `KEYS` bits.
 pub mod key {

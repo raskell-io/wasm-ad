@@ -17,8 +17,9 @@ node ../../tools/wasmad.mjs check build/starter.wasm
 ```
 
 [`examples/starter.c`](examples/starter.c) is the same cart as every other
-SDK's starter: a rotating affine checkerboard, a spinning star and a tune on
-every sound channel, with bit-identical frames and sound. Drop the `.wasm`
+SDK's starter: a rotating affine checkerboard, a spinning star, a second
+star for player 2 when a second controller connects, and a tune on every
+sound channel, with bit-identical frames and sound. Drop the `.wasm`
 into the player.
 
 ## A new cart
@@ -93,13 +94,42 @@ WAD_BGCNT(2) = WAD_BG_SCREEN_BLOCK(8) | WAD_BG_AFFINE_32x32 | WAD_BG_WRAP;
 wad_set_bg_affine(2, wad_affine_rotate_scale(angle, 256, 256), 128, 128, 120, 80);
 ```
 
+## Players
+
+Up to four players (§5). `WAD_KEYS` is player 1; `wad_keys_of(p)` reads
+player `p` (1–4), and `wad_connected(p)` says whether they have a controller,
+from `WAD_PADS`. Keep one `wad_buttons` per player:
+
+```c
+if (wad_connected(2)) {
+    wad_buttons_update_for(&state.p2, 2);
+    if (wad_pressed(&state.p2, WAD_KEY_A)) jump(1);
+}
+```
+
+## Icons
+
+A cart can carry a 32×32 icon that hosts show next to its title (§2.5). Add
+one after building, from a PNG with at most 15 colors plus transparency:
+
+```sh
+node path/to/wasm-ad/tools/wasmad.mjs icon cart.wasm icon.png
+```
+
+## Replays and save states
+
+`wasmad run` records and plays the shareable files of
+[FORMATS.md](../../FORMATS.md), which work in any host:
+`--record run.wadreplay`, `--replay run.wadreplay`, `--save-state at.wadstate`
+and `--state at.wadstate`.
+
 ## API
 
 Registers are lvalues: `WAD_DISPCNT = …`, `uint16_t k = WAD_KEYS;`.
 
 | | |
 |---|---|
-| Registers | `WAD_DISPCNT`, `WAD_BGCNT(n)`, `WAD_BGHOFS(n)`, `WAD_BGVOFS(n)`, `WAD_BG2PA` … `WAD_BG3Y` (or `WAD_BGPA(n)` … `WAD_BGY(n)`), `WAD_WIN0H` … `WAD_BLDY`, `WAD_SOUND1CNT_L` … `WAD_SOUNDCNT_X`, `WAD_PCMA_SAD` … `WAD_PCMB_POS`, `WAD_KEYS`, `WAD_FRAME`, `WAD_SEED`, `WAD_SAVECNT`, `WAD_SAVESTAT`, `WAD_SPEC` |
+| Registers | `WAD_DISPCNT`, `WAD_BGCNT(n)`, `WAD_BGHOFS(n)`, `WAD_BGVOFS(n)`, `WAD_BG2PA` … `WAD_BG3Y` (or `WAD_BGPA(n)` … `WAD_BGY(n)`), `WAD_WIN0H` … `WAD_BLDY`, `WAD_SOUND1CNT_L` … `WAD_SOUNDCNT_X`, `WAD_PCMA_SAD` … `WAD_PCMB_POS`, `WAD_KEYS`, `WAD_KEYS2` … `WAD_KEYS4`, `WAD_PADS`, `WAD_FRAME`, `WAD_SEED`, `WAD_SAVECNT`, `WAD_SAVESTAT`, `WAD_SPEC` |
 | Bits | `WAD_MODE0` … `WAD_DISP_OBJ_WIN`, `WAD_LAYER_*`, `WAD_BLEND_*`, `wad_blend_cnt`, `wad_blend_alpha`, `WAD_KEY_*` |
 | Backgrounds | `WAD_BG_PRIORITY(p) \| WAD_BG_SCREEN_BLOCK(b) \| …`, `wad_screen_entry(tile, bank)`, `wad_screen_block(n)`, `wad_bg_tiles(block)`, `wad_vram` |
 | Affine backgrounds | `WAD_BG_AFFINE_16x16` … `_128x128`, `WAD_BG_WRAP`, `wad_affine_map(block)`, `wad_bg_tiles8(block)`, `wad_set_bg_affine(bg, m, tex_x, tex_y, scr_x, scr_y)` |
@@ -108,6 +138,6 @@ Registers are lvalues: `WAD_DISPCNT = …`, `uint16_t k = WAD_KEYS;`.
 | Colors | `wad_rgb(r, g, b)`, `wad_bg_palette[i]`, `wad_obj_palette[i]` |
 | Sprites | `wad_sprite_new(x, y, WAD_S16x16, tile)`, then `wad_sprite_bank`, `_priority`, `_hflip`, `_vflip`, `_semi_transparent`, `_window`, `_mosaic`, `_8bpp`, `_affine`; `wad_oam_set`, `wad_oam_hide`, `wad_oam_hide_all`, `wad_oam_set_affine`, `wad_obj_tiles` |
 | Math | `wad_sin`, `wad_cos` (angle in 1/256 turns, result in Q14), `wad_affine_rotate_scale(angle, sx, sy)`: the same tables and rounding as every other SDK |
-| Input | `wad_buttons` with `wad_buttons_update`, `wad_held`, `wad_pressed` |
+| Input | `wad_keys()`, `wad_keys_of(player)`, `wad_pads()`, `wad_connected(player)`; `wad_buttons` with `wad_buttons_update`, `wad_buttons_update_for(b, player)`, `wad_held`, `wad_pressed` |
 | System | `wad_frame()`, `wad_seed()`, `wad_save_ram`, `wad_save_restored()`, `wad_request_save()`, `wad_trace(msg)` |
 | Exports and metadata | `WAD_EXPORT(name)`, `WAD_CART(...)` with `WAD_TITLE`, `WAD_AUTHOR`, `WAD_VERSION`, `WAD_DESCRIPTION`, `WAD_URL`, `WAD_META(key, value)` |

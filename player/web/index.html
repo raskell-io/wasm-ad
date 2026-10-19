@@ -14,6 +14,11 @@
     header h1 { font-size: 13px; margin: 0; letter-spacing: 0.08em; }
     header h1 span { color: var(--accent); }
     #info { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #icon { width: 32px; height: 32px; image-rendering: pixelated; }
+    #icon[hidden] { display: none; }
+    .group { display: flex; gap: 6px; flex-wrap: wrap; }
+    button[aria-pressed="true"].toggle { border-color: var(--accent); color: var(--accent); }
+    #record[aria-pressed="true"] { border-color: var(--err); color: var(--err); }
     button, label.button { background: transparent; color: var(--fg); border: 1px solid #34344a; border-radius: 4px;
       padding: 4px 10px; font: inherit; cursor: pointer; }
     button:hover, label.button:hover { border-color: var(--accent); }
@@ -33,12 +38,24 @@
 <body>
   <header>
     <h1>WASM<span>-AD</span></h1>
+    <img id="icon" alt="" hidden>
     <div id="info">No cart loaded</div>
-    <label class="button">Load cart…<input id="file" type="file" accept=".wasm,application/wasm"></label>
-    <button id="reset" disabled>Reset</button>
-    <button id="sound" aria-pressed="true">Sound on</button>
-    <button id="export" disabled>Export save</button>
-    <label class="button" id="import-label">Import save<input id="import" type="file"></label>
+    <div class="group">
+      <label class="button">Load cart…<input id="file" type="file" accept=".wasm,.wadstate,.wadreplay,application/wasm"></label>
+      <button id="reset" disabled>Reset</button>
+      <button id="sound" aria-pressed="true">Sound on</button>
+    </div>
+    <div class="group">
+      <button id="rewind" class="toggle" disabled title="Hold, or hold Backspace">⟲ Rewind</button>
+      <button id="save-state" disabled>Save state</button>
+      <label class="button">Load state<input id="load-state" type="file" accept=".wadstate"></label>
+      <button id="record" disabled aria-pressed="false">● Record</button>
+      <label class="button">Play replay<input id="play-replay" type="file" accept=".wadreplay"></label>
+    </div>
+    <div class="group">
+      <button id="export" disabled>Export save</button>
+      <label class="button" id="import-label">Import save<input id="import" type="file"></label>
+    </div>
   </header>
   <main>
     <canvas id="screen" width="240" height="160"></canvas>
@@ -46,9 +63,9 @@
   </main>
   <footer>
     <kbd>Arrows</kbd> D-pad · <kbd>X</kbd> A · <kbd>Z</kbd> B · <kbd>A</kbd> L · <kbd>S</kbd> R ·
-    <kbd>Enter</kbd> Start · <kbd>Shift</kbd> Select · gamepads supported
+    <kbd>Enter</kbd> Start · <kbd>Shift</kbd> Select · <kbd>Backspace</kbd> rewind · up to four gamepads
   </footer>
-  <div id="drop">Drop cart to play</div>
+  <div id="drop">Drop a cart, save state or replay</div>
   <script type="module" src="player.js"></script>
 </body>
 </html>

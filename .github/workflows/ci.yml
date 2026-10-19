@@ -18,8 +18,13 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: cargo test
       - run: make all
+      # The host conformance suite, against the reference core and the web player's host.
+      - run: make host-test
 
   # Every SDK's starter cart, checked against the spec and against each other.
   sdks:

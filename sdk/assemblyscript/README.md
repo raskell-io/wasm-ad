@@ -2,7 +2,8 @@
 
 An AssemblyScript SDK for [WASM-AD](https://github.com/raskell-io/wasm-ad) carts: register
 addresses, typed builders for backgrounds (tiled and affine), sprites, affine matrices and
-sound, input, save RAM and `trace`, with no runtime allocation and no mutable globals.
+sound, input for up to four players, save RAM and `trace`, with no runtime allocation and no
+mutable globals.
 
 ## The starter cart
 
@@ -13,8 +14,9 @@ node ../../tools/wasmad.mjs check build/starter.wasm
 ```
 
 [`examples/starter.ts`](examples/starter.ts) is the same cart as every other SDK's starter: a
-rotating affine checkerboard, a spinning star and a little tune on every sound channel, with
-bit-identical frames and sound. Drop `build/starter.wasm` into the player.
+rotating affine checkerboard, a spinning star, a second star for player 2 when a second
+controller connects, and a little tune on every sound channel, with bit-identical frames and
+sound. Drop `build/starter.wasm` into the player.
 
 ## A new cart
 
@@ -95,6 +97,38 @@ In modes 1 and 2, BG2 (and BG3 in mode 2) is drawn through a matrix. Its tiles a
 (`bgTile8`) and its map is one byte per tile (`affineMap`). `setBgAffine(2, m, tx, ty, sx, sy)`
 puts texture pixel (tx, ty) at screen pixel (sx, sy) and rotates and scales around it.
 
+## Players
+
+`KEYS` is player 1; players 2–4 read `KEYS2`–`KEYS4`, and `PADS` says which players have a
+controller (SPEC.md §5). `buttons` keeps edge detection for each player:
+
+```ts
+if (connected(2)) {
+  buttons.update(2);
+  if (buttons.pressed(key.A, 2)) jump(2);
+}
+```
+
+## Icons
+
+A cart can carry a 32×32 icon that hosts show next to its title (SPEC.md §2.5). Draw a PNG
+with at most 15 colors plus transparency and add it after building:
+
+```sh
+npx wasmad icon cart.wasm icon.png
+```
+
+## Replays and save states
+
+A cart is deterministic, so `wasmad` can record a run and play it back, or save and resume it
+(FORMATS.md in the repository):
+
+```sh
+npx wasmad run cart.wasm --frames 600 --keys 0-59:right --record run.wadreplay
+npx wasmad run cart.wasm --replay run.wadreplay --save-state end.wadstate
+npx wasmad run cart.wasm --state end.wadstate --frames 60 --ppm frame.ppm
+```
+
 ## API
 
 All values are plain integers; builders take a value and return a new one.
@@ -114,7 +148,8 @@ All values are plain integers; builders take a value and return a new one.
 | `oam.set(i, s)`, `oam.hide(i)`, `oam.hideAll()`, `oam.setAffine(slot, m)` | OAM |
 | `affine.rotateScaleFixed(angle, sx, sy)`, `affine.IDENTITY`, `affine.make` | Affine matrices; angle in 1/256 turns, scale in 8.8 |
 | `fixed.sin(a)`, `fixed.cos(a)` | Q14 trigonometry, identical in every SDK |
-| `buttons.update()`, `buttons.held(k)`, `buttons.pressed(k)`, `keys()` | Input |
+| `buttons.update(player?)`, `buttons.held(k, player?)`, `buttons.pressed(k, player?)`, `keys()` | Input; `player` 1–4, default 1 |
+| `keysOf(player)`, `pads()`, `connected(player)` | Players 1–4 (SPEC.md §5) |
 | `frame()`, `seed()` | Time and the only entropy source |
 | `saveRam()`, `saveRestored()`, `requestSave()` | 32 KB of save RAM at 0x19000 |
 | `sound.enable/disable`, `sound.rate(hz)`, `sound.sweep/envelope/length/noise`, `sound.START/LENGTH/DUTY_*/WAVE_*` | Sound channels 1–4, through `reg.SOUND*` |

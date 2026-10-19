@@ -131,6 +131,10 @@ pub mod reg {
     pub const PCMB_CNT: Reg16 = Reg16(addr::PCM_B + addr::PCM_CNT);
     pub const PCMB_POS: Reg16 = Reg16(addr::PCM_B + addr::PCM_POS);
     pub const KEYS: Reg16 = Reg16(addr::KEYS);
+    pub const KEYS2: Reg16 = Reg16(addr::KEYS2);
+    pub const KEYS3: Reg16 = Reg16(addr::KEYS3);
+    pub const KEYS4: Reg16 = Reg16(addr::KEYS4);
+    pub const PADS: Reg16 = Reg16(addr::PADS);
     pub const FRAME: Reg32 = Reg32(addr::FRAME);
     pub const SEED: Reg32 = Reg32(addr::SEED);
     pub const SAVECNT: Reg16 = Reg16(addr::SAVECNT);
@@ -651,9 +655,29 @@ pub mod pcm {
     }
 }
 
-/// Buttons held this frame.
+/// Buttons held this frame by player 1.
 pub fn keys() -> u16 {
     reg::KEYS.read()
+}
+
+/// Buttons held this frame by `player`, 1–4 (SPEC.md §5).
+pub fn keys_of(player: usize) -> u16 {
+    match player {
+        1 => reg::KEYS.read(),
+        2..=4 => Reg16(KEYS2 + (player - 2) * 2).read(),
+        _ => panic!("players are 1 to 4"),
+    }
+}
+
+/// Bits 0–3: which of players 1–4 have a controller.
+pub fn pads() -> u16 {
+    reg::PADS.read()
+}
+
+/// Whether `player` (1–4) has a controller. Player 1 always does.
+pub fn connected(player: usize) -> bool {
+    assert!((1..=4).contains(&player));
+    pads() & (1 << (player - 1)) != 0
 }
 
 pub use wasm_ad_core::addr::key;
@@ -671,8 +695,12 @@ impl Buttons {
         Self { held: 0, prev: 0 }
     }
     pub fn update(&mut self) {
+        self.update_for(1);
+    }
+    /// Like [`update`](Self::update), for `player` 1–4.
+    pub fn update_for(&mut self, player: usize) {
         self.prev = self.held;
-        self.held = keys();
+        self.held = keys_of(player);
     }
     pub fn held(&self, k: u16) -> bool {
         self.held & k != 0
@@ -733,7 +761,7 @@ macro_rules! cart {
     (title: $title:literal $(, $key:ident : $value:literal)* $(,)?) => {
         #[cfg(target_arch = "wasm32")]
         const _: () = {
-            const META: &str = concat!("spec=0.2\ntitle=", $title, "\n" $(, stringify!($key), "=", $value, "\n")*);
+            const META: &str = concat!("spec=0.3\ntitle=", $title, "\n" $(, stringify!($key), "=", $value, "\n")*);
             #[unsafe(link_section = "wasm-ad")]
             #[used]
             static WASM_AD_META: [u8; META.len()] = $crate::__bytes::<{ META.len() }>(META);
@@ -780,9 +808,17 @@ pub mod host {
     }
 
     /// Runs one frame: writes `KEYS`/`FRAME`/`VCOUNT` as the host would,
-    /// then calls `update`.
+    /// then calls `update`. Only player 1 has a controller.
     pub fn frame(frame: u32, keys: u16, update: impl FnOnce()) {
-        reg::KEYS.write(keys);
+        frame_players(frame, [keys, 0, 0, 0], 1, update);
+    }
+
+    /// Like [`frame`] with four players' buttons and `PADS`.
+    pub fn frame_players(frame: u32, keys: [u16; 4], pads: u16, update: impl FnOnce()) {
+        for (r, k) in [reg::KEYS, reg::KEYS2, reg::KEYS3, reg::KEYS4].into_iter().zip(keys) {
+            r.write(k);
+        }
+        reg::PADS.write(pads | 1);
         reg::FRAME.write(frame);
         reg::VCOUNT.write(160);
         update();
@@ -909,5 +945,10 @@ mod tests {
         assert!(b.pressed(key::A));
         host::frame(1, key::A, || b.update());
         assert!(b.held(key::A) && !b.pressed(key::A));
+
+        let mut p3 = Buttons::default();
+        host::frame_players(2, [0, 0, key::B, 0], 0b100, || p3.update_for(3));
+        assert!(p3.pressed(key::B) && connected(3) && connected(1) && !connected(2));
+        assert_eq!((keys_of(1), keys_of(3)), (0, key::B));
     }
 }

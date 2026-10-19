@@ -4,17 +4,28 @@
 //
 //   wasmad check <cart.wasm>                  validate a cart against SPEC.md
 //   wasmad meta <cart.wasm> key=value...      set the `wasm-ad` metadata section
+//   wasmad icon <cart.wasm> <icon.png>        set the icon (SPEC.md §2.5)
+//   wasmad icon <cart.wasm> --png <out.png>   export the icon as a PNG
 //   wasmad run <cart.wasm> [options]          run frames headlessly
 //
 // `meta` replaces the metadata section in place (or writes `-o <file>`); `spec`
 // defaults to the version this tool implements. It is for toolchains that
 // cannot emit custom sections themselves (AssemblyScript, TinyGo).
 //
+// `icon` takes a 32×32 PNG with at most 15 colors plus transparency.
+//
 // `run` boots the cart like a host does (SPEC.md §3) and renders and makes
 // sound with the reference core, player/web/core.wasm (`make player`). Options:
-//   --frames N        frames to run (default 1)
-//   --keys SCRIPT     held buttons per frame, e.g. "0-29:right,30-59:down+b,60:a"
+//   --frames N        frames to run (default 1, or the replay's length)
+//   --keys SCRIPT     held buttons per frame, e.g. "0-29:right,30-59:down+b,60:a";
+//                     "a@2" is player 2's A button
 //   --seed N          value for SEED (default 1)
+//   --save FILE       boot with this 32 KB save RAM
+//   --replay FILE     play a .wadreplay (FORMATS.md) instead of --keys
+//   --record FILE     write the run as a .wadreplay (--unbound: not tied to the cart)
+//   --state FILE      start from a .wadstate instead of booting
+//   --save-state FILE write a .wadstate after the last frame
+//   --force           use a replay or state made for a different cart
 //   --hash F,F,...    print a hash of the frame rendered at each listed frame,
 //                     and one of all the sound
 //   --ppm FILE        write the last rendered frame as a PPM image
@@ -24,17 +35,20 @@
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { deflateRawSync, deflateSync, inflateRawSync, inflateSync } from 'node:zlib';
 
-const SPEC = '0.2';
-const SPEC_VERSION = 0x0002;
+const SPEC = '0.3';
+const SPEC_VERSION = 0x0003;
 const W = 240, H = 160;
 const A = {
   IO: 0x400, PAL_END: 0xC00, OAM: 0xC00, VIDEO_END: 0x19000, SAVE: 0x19000, SAVE_SIZE: 0x8000, CART: 0x28000,
   VCOUNT: 0x406, KEYS: 0x700, FRAME: 0x704, SEED: 0x708, SAVECNT: 0x70C, SAVESTAT: 0x70E, SPEC: 0x710,
+  KEYS2: 0x712, KEYS3: 0x714, KEYS4: 0x716, PADS: 0x718,
   BG2PA: 0x420, BG2PD: 0x426, BG3PA: 0x430, BG3PD: 0x436,
   SOUND_REGS: 0x460, SOUND_REGS_END: 0x4D0, SOUND_STATE: 0x780, SOUND_STATE_END: 0x800,
 };
 const SOUND_SAMPLES = 800;
+const ICON_SIZE = 544;
 const KEY = { a: 1, b: 2, select: 4, start: 8, right: 16, left: 32, up: 64, down: 128, r: 256, l: 512 };
 const MAX_CART = 32 * 1024 * 1024;
 
@@ -250,6 +264,17 @@ export function check(bytes) {
     else if (!/^\d+\.\d+$/.test(meta.spec)) errors.push(`metadata spec "${meta.spec}" is not major.minor (§2.3)`);
     if (!meta.title) errors.push('metadata has no title (§2.3)');
   }
+  // §2.5 icon
+  const icons = m.custom.filter((c) => c.name === 'wasm-ad-icon');
+  if (icons.length) {
+    if (icons[0].data.length !== ICON_SIZE) errors.push(`the icon section is ${icons[0].data.length} bytes; it must be ${ICON_SIZE} (§2.5)`);
+    else {
+      const used = new Set();
+      for (const b of icons[0].data.subarray(32)) used.add(b & 15).add(b >> 4);
+      used.delete(0);
+      info.push(`icon: 32×32, ${used.size} colors`);
+    }
+  }
   return { errors, warnings, meta, info };
 }
 
@@ -273,43 +298,267 @@ function leb(n) {
   return out;
 }
 
-/** Returns `bytes` with its `wasm-ad` sections replaced by one holding `meta`. */
-export function setMeta(bytes, meta) {
-  const text = Object.entries(meta).map(([k, v]) => `${k}=${v}\n`).join('');
-  const name = new TextEncoder().encode('wasm-ad');
-  const payload = [...leb(name.length), ...name, ...new TextEncoder().encode(text)];
-  const section = Uint8Array.from([0, ...leb(payload.length), ...payload]);
-  const parts = [bytes.subarray(0, 8)];
-  for (const s of sections(bytes)) {
-    if (s.id === 0 && new Reader(bytes, s.body, s.end).name() === 'wasm-ad') continue;
-    parts.push(bytes.subarray(s.start, s.end));
-  }
-  parts.push(section);
+function concat(parts) {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;
   for (const p of parts) { out.set(p, at); at += p.length; }
   return out;
 }
 
+/** Returns `bytes` with its custom sections called `name` replaced by one holding `data`. */
+export function setSection(bytes, name, data) {
+  const n = new TextEncoder().encode(name);
+  const payload = concat([Uint8Array.from([...leb(n.length), ...n]), data]);
+  const parts = [bytes.subarray(0, 8)];
+  for (const s of sections(bytes)) {
+    if (s.id === 0 && new Reader(bytes, s.body, s.end).name() === name) continue;
+    parts.push(bytes.subarray(s.start, s.end));
+  }
+  parts.push(Uint8Array.from([0, ...leb(payload.length)]), payload);
+  return concat(parts);
+}
+
+/** Returns `bytes` with its `wasm-ad` sections replaced by one holding `meta`. */
+export function setMeta(bytes, meta) {
+  const text = Object.entries(meta).map(([k, v]) => `${k}=${v}\n`).join('');
+  return setSection(bytes, 'wasm-ad', new TextEncoder().encode(text));
+}
+
+// ---- Icons (SPEC.md §2.5) --------------------------------------------------------
+
+/** Decodes a non-interlaced 8-bit-or-less PNG into { width, height, rgba }. */
+export function decodePng(bytes) {
+  const sig = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (sig.some((b, i) => bytes[i] !== b)) throw new Error('not a PNG file');
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let width, height, depth, type, palette = [], alpha = [], idat = [];
+  for (let at = 8; at < bytes.length;) {
+    const len = dv.getUint32(at);
+    const kind = String.fromCharCode(...bytes.subarray(at + 4, at + 8));
+    const data = bytes.subarray(at + 8, at + 8 + len);
+    if (kind === 'IHDR') {
+      const h = new DataView(data.buffer, data.byteOffset, len);
+      [width, height, depth, type] = [h.getUint32(0), h.getUint32(4), data[8], data[9]];
+      if (data[12]) throw new Error('interlaced PNGs are not supported');
+      if (depth > 8) throw new Error('16-bit PNGs are not supported');
+    } else if (kind === 'PLTE') for (let i = 0; i < len; i += 3) palette.push([data[i], data[i + 1], data[i + 2]]);
+    else if (kind === 'tRNS') alpha = [...data];
+    else if (kind === 'IDAT') idat.push(data);
+    at += 12 + len;
+  }
+  const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[type];
+  if (!channels) throw new Error(`unsupported PNG color type ${type}`);
+  const raw = inflateSync(concat(idat));
+  const stride = Math.ceil((width * channels * depth) / 8), bpp = Math.max(1, (channels * depth) / 8);
+  const rows = [];
+  let prev = new Uint8Array(stride);
+  for (let y = 0; y < height; y++) {
+    const f = raw[y * (stride + 1)], line = raw.slice(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? line[i - bpp] : 0, b = prev[i], c = i >= bpp ? prev[i - bpp] : 0;
+      const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+      line[i] += [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f];
+    }
+    rows.push(prev = line);
+  }
+  const rgba = new Uint8Array(width * height * 4);
+  const sample = (row, i) => (depth === 8 ? row[i] : (row[(i * depth) >> 3] >> (8 - depth - ((i * depth) & 7))) & ((1 << depth) - 1));
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const o = (y * width + x) * 4, r = rows[y];
+      let px;
+      if (type === 3) { const i = sample(r, x); px = [...(palette[i] ?? [0, 0, 0]), alpha[i] ?? 255]; }
+      else if (type === 0 || type === 4) {
+        const g = sample(r, x * channels) * (255 / ((1 << depth) - 1));
+        px = [g, g, g, type === 4 ? r[x * 2 + 1] : 255];
+      } else px = [r[x * channels], r[x * channels + 1], r[x * channels + 2], type === 6 ? r[x * 4 + 3] : 255];
+      rgba.set(px, o);
+    }
+  }
+  return { width, height, rgba };
+}
+
+/** Encodes RGBA8 pixels as a PNG. */
+export function encodePng(width, height, rgba) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    for (let k = 0; k < 8; k++) n = n & 1 ? 0xEDB88320 ^ (n >>> 1) : n >>> 1;
+    return n >>> 0;
+  });
+  const crc = (b) => { let c = 0xFFFFFFFF; for (const x of b) c = crcTable[(c ^ x) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  const chunk = (kind, data) => {
+    const out = new Uint8Array(12 + data.length), dv = new DataView(out.buffer);
+    dv.setUint32(0, data.length);
+    out.set(new TextEncoder().encode(kind), 4);
+    out.set(data, 8);
+    dv.setUint32(8 + data.length, crc(out.subarray(4, 8 + data.length)));
+    return out;
+  };
+  const ihdr = new Uint8Array(13), h = new DataView(ihdr.buffer);
+  h.setUint32(0, width); h.setUint32(4, height); ihdr.set([8, 6, 0, 0, 0], 8);
+  const raw = new Uint8Array(height * (width * 4 + 1));
+  for (let y = 0; y < height; y++) raw.set(rgba.subarray(y * width * 4, (y + 1) * width * 4), y * (width * 4 + 1) + 1);
+  return concat([Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', new Uint8Array())]);
+}
+
+/** Converts a 32×32 PNG with at most 15 colors plus transparency to an icon section's 544 bytes. */
+export function iconFromPng(png) {
+  const { width, height, rgba } = decodePng(png);
+  if (width !== 32 || height !== 32) throw new Error(`the icon is ${width}×${height}; it must be 32×32`);
+  const colors = [0], out = new Uint8Array(ICON_SIZE), dv = new DataView(out.buffer);
+  for (let i = 0; i < 1024; i++) {
+    let index = 0;
+    if (rgba[i * 4 + 3] >= 128) {
+      const c = (rgba[i * 4] >> 3) | ((rgba[i * 4 + 1] >> 3) << 5) | ((rgba[i * 4 + 2] >> 3) << 10);
+      index = colors.indexOf(c, 1);
+      if (index < 0) index = colors.push(c) - 1;
+    }
+    out[32 + (i >> 1)] |= index << ((i & 1) * 4);
+  }
+  if (colors.length > 16) throw new Error(`the icon has ${colors.length - 1} colors; at most 15 plus transparency fit (§2.5)`);
+  colors.forEach((c, i) => dv.setUint16(i * 2, c, true));
+  return out;
+}
+
+/** The cart's icon as 32×32 RGBA8 pixels, or null. */
+export function readIcon(bytes) {
+  const icon = inspect(bytes).custom.find((c) => c.name === 'wasm-ad-icon');
+  if (!icon || icon.data.length !== ICON_SIZE) return null;
+  const d = icon.data, rgba = new Uint8Array(1024 * 4);
+  for (let i = 0; i < 1024; i++) {
+    const index = (d[32 + (i >> 1)] >> ((i & 1) * 4)) & 15;
+    if (!index) continue;
+    const c = d[index * 2] | (d[index * 2 + 1] << 8);
+    const x = (v) => (v << 3) | (v >> 2);
+    rgba.set([x(c & 31), x((c >> 5) & 31), x((c >> 10) & 31), 255], i * 4);
+  }
+  return rgba;
+}
+
+// ---- Replays and save states (FORMATS.md) -------------------------------------
+
+const FORMAT_VERSION = 1;
+
+export function sha256(bytes) {
+  return new Uint8Array(createHash('sha256').update(bytes).digest());
+}
+
+function header(magic, cartHash, frames, seed) {
+  const out = new Uint8Array(48), dv = new DataView(out.buffer);
+  out.set(new TextEncoder().encode(magic));
+  dv.setUint16(4, FORMAT_VERSION, true);
+  dv.setUint16(6, SPEC_VERSION, true);
+  if (cartHash) out.set(cartHash, 8);
+  dv.setUint32(40, frames >>> 0, true);
+  dv.setUint32(44, seed >>> 0, true);
+  return out;
+}
+
+function readHeader(bytes, magic, what) {
+  if (bytes.length < 48 || new TextDecoder().decode(bytes.subarray(0, 4)) !== magic) throw new Error(`not a ${what} file`);
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, 48);
+  const version = dv.getUint16(4, true);
+  if (version > FORMAT_VERSION) throw new Error(`${what} format ${version} is newer than this tool's (${FORMAT_VERSION})`);
+  const cart = bytes.slice(8, 40);
+  return {
+    version, spec: dv.getUint16(6, true), cart: cart.some((b) => b) ? cart : null,
+    frames: dv.getUint32(40, true), seed: dv.getUint32(44, true), body: inflateRawSync(bytes.subarray(48)),
+  };
+}
+
+/** Throws unless a replay or state made for `hash` (null: any cart) fits `cart`. */
+export function checkCart(hash, cart, force = false) {
+  if (!hash || force) return;
+  if (!sha256(cart).every((b, i) => b === hash[i])) throw new Error('this file was made for a different cart (--force to use it anyway)');
+}
+
+/**
+ * A .wadreplay: `inputs` holds [KEYS, KEYS2, KEYS3, KEYS4, PADS] per frame;
+ * `cart` null makes it an input script for any cart.
+ */
+export function encodeReplay({ cart = null, seed, save = null, inputs }) {
+  const runs = [];
+  for (const input of inputs) {
+    const last = runs.at(-1);
+    if (last && last.input.every((v, i) => v === input[i])) last.n++;
+    else runs.push({ n: 1, input });
+  }
+  const body = new Uint8Array(2 + (save ? A.SAVE_SIZE : 0) + runs.length * 14), dv = new DataView(body.buffer);
+  let at = 2;
+  if (save) { dv.setUint16(0, 1, true); body.set(save, 2); at += A.SAVE_SIZE; }
+  for (const { n, input } of runs) {
+    dv.setUint32(at, n, true);
+    for (let i = 0; i < 5; i++) dv.setUint16(at + 4 + i * 2, input[i] ?? 0, true);
+    at += 14;
+  }
+  return concat([header('WADR', cart && sha256(cart), inputs.length, seed), deflateRawSync(body)]);
+}
+
+export function decodeReplay(bytes) {
+  const { body, ...h } = readHeader(bytes, 'WADR', 'replay');
+  const dv = new DataView(body.buffer, body.byteOffset, body.byteLength);
+  let at = 2, save = null;
+  if (dv.getUint16(0, true) & 1) { save = body.slice(2, 2 + A.SAVE_SIZE); at += A.SAVE_SIZE; }
+  const inputs = [];
+  for (; at + 14 <= body.length; at += 14) {
+    const input = [0, 1, 2, 3, 4].map((i) => dv.getUint16(at + 4 + i * 2, true));
+    for (let n = dv.getUint32(at, true); n--;) inputs.push(input);
+  }
+  if (inputs.length !== h.frames) throw new Error('the replay is damaged: its runs do not add up to its frame count');
+  return { ...h, save, inputs };
+}
+
+/** A .wadstate of `memory` after `frame` frames. */
+export function encodeState({ cart, frame, seed, memory }) {
+  const body = new Uint8Array(4 + memory.length);
+  new DataView(body.buffer).setUint32(0, memory.length, true);
+  body.set(memory, 4);
+  return concat([header('WADS', sha256(cart), frame, seed), deflateRawSync(body)]);
+}
+
+export function decodeState(bytes) {
+  const { body, ...h } = readHeader(bytes, 'WADS', 'save state');
+  const length = new DataView(body.buffer, body.byteOffset, 4).getUint32(0, true);
+  if (length % 65536 || body.length !== 4 + length) throw new Error('the save state is damaged');
+  if (!h.cart) throw new Error('the save state names no cart');
+  return { ...h, memory: body.subarray(4) };
+}
+
 // ---- Headless host ----------------------------------------------------------
 
-/** Parses "0-29:right,30-59:down+b,60:a" into a frame -> KEYS function. */
+/**
+ * Parses "0-29:right,30-59:down+b+a@2" into a function from a frame number to
+ * [KEYS, KEYS2, KEYS3, KEYS4, PADS]. "b@2" is player 2's B; every player the
+ * script mentions has a controller for the whole run.
+ */
 export function parseKeys(script) {
+  let pads = 1;
   const spans = (script ?? '').split(',').filter(Boolean).map((part) => {
     const [range, buttons] = part.split(':');
     const [from, to = from] = range.split('-').map(Number);
-    let mask = 0;
+    const masks = [0, 0, 0, 0];
     for (const b of (buttons ?? '').split('+').filter(Boolean)) {
-      if (!(b in KEY)) throw new Error(`unknown button "${b}"; use ${Object.keys(KEY).join(', ')}`);
-      mask |= KEY[b];
+      const [name, player = '1'] = b.split('@');
+      const p = Number(player) - 1;
+      if (!(name in KEY)) throw new Error(`unknown button "${name}"; use ${Object.keys(KEY).join(', ')}`);
+      if (!(p >= 0 && p < 4)) throw new Error(`unknown player "${player}"; use 1 to 4`);
+      masks[p] |= KEY[name];
+      pads |= 1 << p;
     }
-    return { from, to, mask };
+    return { from, to, masks };
   });
-  return (frame) => spans.reduce((k, s) => (frame >= s.from && frame <= s.to ? k | s.mask : k), 0);
+  return (frame) => {
+    const out = [0, 0, 0, 0, pads];
+    for (const s of spans) if (frame >= s.from && frame <= s.to) s.masks.forEach((m, i) => { out[i] |= m; });
+    return out;
+  };
 }
 
-/** Boots a cart and returns a host that runs frames (SPEC.md §3). */
-export async function boot(bytes, { core: corePath, seed = 1, onTrace = () => {} } = {}) {
+/**
+ * Boots a cart and returns a host that runs frames (SPEC.md §3). `save` is
+ * the save RAM to restore at boot; `state` a decoded save state to start
+ * from instead of booting (FORMATS.md §3).
+ */
+export async function boot(bytes, { core: corePath, seed = 1, save = null, state = null, onTrace = () => {} } = {}) {
   const core = (await WebAssembly.instantiate(readFileSync(corePath))).instance.exports;
   let instance;
   const decoder = new TextDecoder();
@@ -318,21 +567,45 @@ export async function boot(bytes, { core: corePath, seed = 1, onTrace = () => {}
   const ex = instance.exports;
   const mem = () => new Uint8Array(ex.memory.buffer);
   const dv = () => new DataView(ex.memory.buffer);
-  mem().fill(0, 0, A.CART);
-  for (let i = 0; i < 128; i++) dv().setUint16(A.OAM + i * 8, 0x0200, true);
-  for (const a of [A.BG2PA, A.BG2PD, A.BG3PA, A.BG3PD]) dv().setUint16(a, 0x100, true);
-  dv().setUint32(A.SEED, seed >>> 0, true);
-  dv().setUint16(A.SPEC, SPEC_VERSION, true);
-  ex.start?.();
-
   let frame = 0, sound = new Int16Array(SOUND_SAMPLES * 2);
+  if (state) {
+    const grow = (state.memory.length - ex.memory.buffer.byteLength) / 65536;
+    if (grow < 0) throw new Error('the save state has less memory than the cart starts with');
+    if (grow) ex.memory.grow(grow);
+    mem().set(state.memory);
+    frame = state.frames;
+  } else {
+    mem().fill(0, 0, A.CART);
+    for (let i = 0; i < 128; i++) dv().setUint16(A.OAM + i * 8, 0x0200, true);
+    for (const a of [A.BG2PA, A.BG2PD, A.BG3PA, A.BG3PD]) dv().setUint16(a, 0x100, true);
+    dv().setUint32(A.SEED, seed >>> 0, true);
+    dv().setUint16(A.SPEC, SPEC_VERSION, true);
+    if (save) {
+      mem().set(save, A.SAVE);
+      dv().setUint16(A.SAVESTAT, 1, true);
+    }
+    ex.start?.();
+  }
+
   return {
     exports: ex,
     /** The last frame's sound: 800 stereo pairs of i16, left first. */
     get sound() { return sound; },
-    /** Runs one frame with `keys` held and returns the rendered RGBA8 pixels. */
-    frame(keys = 0) {
+    /** Frames run since boot. */
+    get frames() { return frame; },
+    /** A copy of the cart's whole linear memory, between frames. */
+    memory() { return mem().slice(); },
+    /**
+     * Runs one frame and returns the rendered RGBA8 pixels. `input` is KEYS,
+     * or [KEYS, KEYS2, KEYS3, KEYS4, PADS].
+     */
+    frame(input = 0) {
+      const [keys, k2 = 0, k3 = 0, k4 = 0, pads = 1] = typeof input === 'number' ? [input] : input;
       dv().setUint16(A.KEYS, keys & 0x3FF, true);
+      dv().setUint16(A.KEYS2, k2 & 0x3FF, true);
+      dv().setUint16(A.KEYS3, k3 & 0x3FF, true);
+      dv().setUint16(A.KEYS4, k4 & 0x3FF, true);
+      dv().setUint16(A.PADS, (pads & 0xF) | 1, true);
       dv().setUint32(A.FRAME, frame >>> 0, true);
       dv().setUint16(A.VCOUNT, 160, true);
       ex.update();
@@ -388,12 +661,16 @@ function ppm(pixels) {
 
 // ---- CLI ----------------------------------------------------------------------
 
+const FLAGS = new Set(['force', 'unbound']);
+
 function options(args) {
   const opts = { _: [] };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '-o') opts.o = args[++i];
-    else if (args[i].startsWith('--')) opts[args[i].slice(2)] = args[++i];
-    else opts._.push(args[i]);
+    else if (args[i].startsWith('--')) {
+      const name = args[i].slice(2);
+      opts[name] = FLAGS.has(name) ? true : args[++i];
+    } else opts._.push(args[i]);
   }
   return opts;
 }
@@ -401,8 +678,16 @@ function options(args) {
 async function main([cmd, ...args]) {
   const opts = options(args);
   const [file, ...rest] = opts._;
-  if (!cmd || !file || !['check', 'meta', 'run'].includes(cmd)) {
-    console.error('usage: wasmad check <cart.wasm>\n       wasmad meta <cart.wasm> [-o out.wasm] key=value...\n       wasmad run <cart.wasm> [--frames N] [--keys SCRIPT] [--seed N] [--hash F,F] [--ppm FILE] [--wav FILE]');
+  if (!cmd || !file || !['check', 'meta', 'icon', 'run'].includes(cmd)) {
+    console.error([
+      'usage: wasmad check <cart.wasm>',
+      '       wasmad meta <cart.wasm> [-o out.wasm] key=value...',
+      '       wasmad icon <cart.wasm> <icon.png> [-o out.wasm]',
+      '       wasmad icon <cart.wasm> --png <out.png>',
+      '       wasmad run <cart.wasm> [--frames N] [--keys SCRIPT | --replay FILE] [--seed N] [--save FILE]',
+      '                  [--state FILE] [--hash F,F] [--ppm FILE] [--wav FILE] [--record FILE [--unbound]]',
+      '                  [--save-state FILE] [--force]',
+    ].join('\n'));
     return 2;
   }
   const bytes = new Uint8Array(readFileSync(file));
@@ -416,6 +701,18 @@ async function main([cmd, ...args]) {
     }
     if (!meta.title) throw new Error('title=... is required');
     writeFileSync(opts.o ?? file, setMeta(bytes, meta));
+    return 0;
+  }
+
+  if (cmd === 'icon') {
+    if (opts.png) {
+      const rgba = readIcon(bytes);
+      if (!rgba) throw new Error('the cart has no icon');
+      writeFileSync(opts.png, encodePng(32, 32, rgba));
+    } else {
+      if (!rest[0]) throw new Error('give a 32×32 PNG');
+      writeFileSync(opts.o ?? file, setSection(bytes, 'wasm-ad-icon', iconFromPng(new Uint8Array(readFileSync(rest[0])))));
+    }
     return 0;
   }
 
@@ -435,17 +732,29 @@ async function main([cmd, ...args]) {
     return 1;
   }
   const core = opts.core ?? fileURLToPath(new URL('../player/web/core.wasm', import.meta.url));
-  const host = await boot(bytes, { core, seed: Number(opts.seed ?? 1), onTrace: (m) => console.log(`trace: ${m}`) });
+  const replay = opts.replay ? decodeReplay(new Uint8Array(readFileSync(opts.replay))) : null;
+  const state = opts.state ? decodeState(new Uint8Array(readFileSync(opts.state))) : null;
+  if (replay) checkCart(replay.cart, bytes, opts.force);
+  if (state) checkCart(state.cart, bytes, opts.force);
+  if (state && opts.record) throw new Error('a replay starts at boot, so it cannot be recorded from a save state');
+  let save = replay ? replay.save : opts.save ? new Uint8Array(readFileSync(opts.save)) : null;
+  if (save && save.length !== A.SAVE_SIZE) throw new Error('a save file must be exactly 32 KB');
+  const seed = replay?.seed ?? Number(opts.seed ?? 1);
+  const host = await boot(bytes, { core, seed, save, state, onTrace: (m) => console.log(`trace: ${m}`) });
   const keys = parseKeys(opts.keys);
-  const frames = Number(opts.frames ?? 1);
+  const input = (f) => (replay ? replay.inputs[f] ?? [0, 0, 0, 0, 1] : keys(f));
+  const first = host.frames, frames = Number(opts.frames ?? (replay ? replay.frames - first : 1));
   const marks = new Set((opts.hash ?? '').split(',').filter(Boolean).map(Number));
   let pixels;
-  const sound = [];
-  for (let f = 0; f < frames; f++) {
-    pixels = host.frame(keys(f));
+  const sound = [], recorded = [];
+  for (let f = first; f < first + frames; f++) {
+    recorded.push(input(f));
+    pixels = host.frame(input(f));
     sound.push(host.sound);
     if (marks.has(f)) console.log(`frame ${f}: ${hash(pixels)}`);
   }
+  if (opts.record) writeFileSync(opts.record, encodeReplay({ cart: opts.unbound ? null : bytes, seed, save, inputs: recorded }));
+  if (opts['save-state']) writeFileSync(opts['save-state'], encodeState({ cart: bytes, frame: host.frames, seed: state?.seed ?? seed, memory: host.memory() }));
   if (opts.hash) console.log(`sound: ${hash(...sound)}`);
   if (opts.ppm) writeFileSync(opts.ppm, ppm(pixels));
   if (opts.wav) writeFileSync(opts.wav, wav(sound));

@@ -36,7 +36,7 @@ export const WAVE_RAM: usize = 0x490;
 export const CART: usize = 0x28000;
 /** OAM attribute 0 that hides a sprite. */
 export const OBJ_HIDDEN: u16 = 0x0200;
-export const SPEC_VERSION: u16 = 0x0002;
+export const SPEC_VERSION: u16 = 0x0003;
 
 // ---- Registers (SPEC.md §5, §6, §14) ----------------------------------------
 
@@ -60,6 +60,11 @@ export namespace reg {
   export const SAVECNT: usize = 0x70c;
   export const SAVESTAT: usize = 0x70e;
   export const SPEC: usize = 0x710;
+  export const KEYS2: usize = 0x712;
+  export const KEYS3: usize = 0x714;
+  export const KEYS4: usize = 0x716;
+  /** Bits 0–3: players 1–4 have a controller. */
+  export const PADS: usize = 0x718;
 
   export const BG2PA: usize = 0x420;
   export const BG2PB: usize = 0x422;
@@ -667,27 +672,54 @@ export namespace fixed {
 
 // ---- Input, time, save RAM -------------------------------------------------------
 
-/** Buttons held this frame. */
+/** Buttons held this frame by player 1. */
 // @ts-ignore: decorator
 @inline export function keys(): u16 {
   return load<u16>(reg.KEYS);
 }
 
+/** Buttons held this frame by `player`, 1–4 (SPEC.md §5). */
+export function keysOf(player: i32): u16 {
+  assert(player >= 1 && player <= 4);
+  return player == 1 ? load<u16>(reg.KEYS) : load<u16>(reg.KEYS2 + <usize>(player - 2) * 2);
+}
+
+/** Bits 0–3: which of players 1–4 have a controller. */
+// @ts-ignore: decorator
+@inline export function pads(): u16 {
+  return load<u16>(reg.PADS);
+}
+
+/** Whether `player` (1–4) has a controller. Player 1 always does. */
+export function connected(player: i32): bool {
+  assert(player >= 1 && player <= 4);
+  return (<i32>pads() & (1 << (player - 1))) != 0;
+}
+
 /** Edge detection over `KEYS`: call `buttons.update()` at the start of every
  *  frame. Its two words of state live in linear memory. */
 export namespace buttons {
-  const STATE: usize = memory.data(4); // held: u16, prev: u16
+  // Per player 1–4: held: u16, prev: u16.
+  const STATE: usize = memory.data(16);
 
-  export function update(): void {
-    store<u16>(STATE + 2, load<u16>(STATE));
-    store<u16>(STATE, keys());
+  // @ts-ignore: decorator
+  @inline function at(player: i32): usize {
+    return STATE + <usize>(player - 1) * 4;
   }
-  export function held(k: u16): bool {
-    return (load<u16>(STATE) & k) != 0;
+
+  /** Reads `player`'s buttons (default player 1) for this frame. */
+  export function update(player: i32 = 1): void {
+    const s = at(player);
+    store<u16>(s + 2, load<u16>(s));
+    store<u16>(s, keysOf(player));
+  }
+  export function held(k: u16, player: i32 = 1): bool {
+    return (load<u16>(at(player)) & k) != 0;
   }
   /** True only on the frame the button went down. */
-  export function pressed(k: u16): bool {
-    return (load<u16>(STATE) & ~load<u16>(STATE + 2) & k) != 0;
+  export function pressed(k: u16, player: i32 = 1): bool {
+    const s = at(player);
+    return (load<u16>(s) & ~load<u16>(s + 2) & k) != 0;
   }
 }
 

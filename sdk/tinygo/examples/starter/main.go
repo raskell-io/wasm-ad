@@ -2,8 +2,9 @@
 // affine background) blended over a backdrop gradient drawn per scanline,
 // a spinning star you move with the D-pad, and a little tune on all four
 // sound channels. B goes faster and plays a sample; A toggles mosaic with a
-// rising blip. It uses integer math only, so every language's build renders
-// bit-identical frames and sound.
+// rising blip. A second controller brings in a blue star for player 2. It
+// uses integer math only, so every language's build renders bit-identical
+// frames and sound.
 //
 //	./build.sh examples/starter
 package main
@@ -25,11 +26,13 @@ type State struct {
 	buttons wasmad.Buttons
 	x, y    int32
 	mosaic  bool
+	p2      wasmad.Buttons
+	x2, y2  int32
 }
 
 // Package variables live in linear memory. Initialize them with constants
 // only: package initializers do not run in a cart (see README.md).
-var state = State{x: 112, y: 72}
+var state = State{x: 112, y: 72, x2: 40, y2: 72}
 
 //export start
 func start() {
@@ -57,6 +60,9 @@ func start() {
 	obj := wasmad.ObjPalette()
 	obj[1] = wasmad.RGB(255, 216, 64)
 	obj[2] = wasmad.RGB(232, 96, 32)
+	// Player 2's star: the same tiles in palette bank 1.
+	obj[17] = wasmad.RGB(96, 200, 255)
+	obj[18] = wasmad.RGB(40, 80, 220)
 	star := wasmad.ObjTiles()
 	for y := int32(0); y < 16; y++ {
 		for x := int32(0); x < 16; x++ {
@@ -162,6 +168,28 @@ func update() {
 		star = star.Mosaic()
 	}
 	wasmad.OAMSet(0, star)
+
+	// Player 2 joins when a second controller connects (SPEC.md §5).
+	if wasmad.Connected(2) {
+		s.p2.UpdateFor(2)
+		if s.p2.Held(wasmad.KeyLeft) {
+			s.x2--
+		}
+		if s.p2.Held(wasmad.KeyRight) {
+			s.x2++
+		}
+		if s.p2.Held(wasmad.KeyUp) {
+			s.y2--
+		}
+		if s.p2.Held(wasmad.KeyDown) {
+			s.y2++
+		}
+		s.x2 = min(max(s.x2, 0), 240-32)
+		s.y2 = min(max(s.y2, 0), 160-32)
+		wasmad.OAMSet(1, wasmad.NewSprite(s.x2, s.y2, wasmad.S16x16, 0).Bank(1).Affine(0, true))
+	} else {
+		wasmad.OAMHide(1)
+	}
 }
 
 // Raster effect: a new backdrop color on every line.

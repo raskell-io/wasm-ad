@@ -2,13 +2,14 @@
 // affine background) blended over a backdrop gradient drawn per scanline,
 // a spinning star you move with the D-pad, and a little tune on all four
 // sound channels. B goes faster and plays a sample; A toggles mosaic with a
-// rising blip. It uses integer math only, so every language's build renders
-// bit-identical frames and sound.
+// rising blip. A second controller brings in a blue star for player 2. It
+// uses integer math only, so every language's build renders bit-identical
+// frames and sound.
 //
 //   npm run build        -> build/starter.wasm
 
 import {
-  affine, affineMap, AffineSize, bgcnt, bgTile8, blend, buttons, dispcnt, fixed, frame, key, layer, oam, objTile,
+  affine, affineMap, AffineSize, bgcnt, bgTile8, blend, buttons, connected, dispcnt, fixed, frame, key, layer, oam, objTile,
   pcm, reg, rgb, setBgAffine, setBgColor, setObjColor, sound, sprite, SpriteSize, trace, write16,
 } from "../assembly/index";
 
@@ -25,6 +26,8 @@ class State {
   x: i32;
   y: i32;
   mosaic: bool;
+  x2: i32;
+  y2: i32;
 }
 const state = changetype<State>(memory.data(offsetof<State>()));
 
@@ -33,6 +36,8 @@ export function start(): void {
   state.x = 112;
   state.y = 72;
   state.mosaic = false;
+  state.x2 = 40;
+  state.y2 = 72;
 
   // A checkerboard of two solid 8bpp tiles on affine background 2, 32×32 tiles.
   setBgColor(1, rgb(255, 255, 255));
@@ -48,6 +53,9 @@ export function start(): void {
   // A 16×16 star in four 1D-mapped sprite tiles.
   setObjColor(1, rgb(255, 216, 64));
   setObjColor(2, rgb(232, 96, 32));
+  // Player 2's star: the same tiles in palette bank 1.
+  setObjColor(17, rgb(96, 200, 255));
+  setObjColor(18, rgb(40, 80, 220));
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
       const dx = abs(x * 2 - 15), dy = abs(y * 2 - 15);
@@ -123,6 +131,20 @@ export function update(): void {
   oam.setAffine(0, affine.rotateScaleFixed(t * 2, scale, scale));
   const star = sprite.affine(sprite.make(state.x, state.y, SpriteSize.S16x16, 0), 0, true);
   oam.set(0, state.mosaic ? sprite.mosaic(star) : star);
+
+  // Player 2 joins when a second controller connects (SPEC.md §5).
+  if (connected(2)) {
+    buttons.update(2);
+    if (buttons.held(key.LEFT, 2)) state.x2 -= 1;
+    if (buttons.held(key.RIGHT, 2)) state.x2 += 1;
+    if (buttons.held(key.UP, 2)) state.y2 -= 1;
+    if (buttons.held(key.DOWN, 2)) state.y2 += 1;
+    state.x2 = min(max(state.x2, 0), 240 - 32);
+    state.y2 = min(max(state.y2, 0), 160 - 32);
+    oam.set(1, sprite.affine(sprite.bank(sprite.make(state.x2, state.y2, SpriteSize.S16x16, 0), 1), 0, true));
+  } else {
+    oam.hide(1);
+  }
 }
 
 /** Raster effect: a new backdrop color on every line. */

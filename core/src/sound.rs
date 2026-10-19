@@ -111,7 +111,8 @@ struct State {
     pcm: [Pcm; 2],
 }
 
-/// Little-endian (de)serialization of `State`, in field order.
+/// Little-endian (de)serialization of `State`, in field order: this order is
+/// the layout SPEC.md §14.8 fixes, so don't reorder fields.
 struct Cursor<'a> {
     bytes: &'a mut [u8],
     at: usize,
@@ -691,6 +692,31 @@ mod tests {
         let mut hw = Hw::on();
         hw.frames(60);
         assert!(hw.0[SOUND_STATE..SOUND_STATE + 4].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn state_layout_matches_the_spec() {
+        let mut hw = Hw::on();
+        hw.w(SOUND1CNT_H, 0xA380).w(SOUND1CNT_X, 0x8000 | 1000);
+        hw.w(SOUND2CNT_L, 0x7180).w(SOUND2CNT_H, 0x8000 | 1000);
+        hw.0[WAVE_RAM] = 0x12;
+        hw.w(SOUND3CNT_L, 0x80).w(SOUND3CNT_H, 1 << 13).w(SOUND3CNT_X, 0x8000 | 1000);
+        hw.w(SOUND4CNT_L, 0xC500).w(SOUND4CNT_H, 0x8000 | 0x21);
+        hw.w(PCM_A + PCM_LEN, 4000).w(PCM_A + PCM_RATE, 12000).w(PCM_A + PCM_CNT, 0x8000 | 64);
+        hw.w(PCM_B + PCM_LEN, 4000).w(PCM_B + PCM_RATE, 6000).w(PCM_B + PCM_CNT, 0x8000 | 64);
+        hw.frame();
+        let st = &hw.0[SOUND_STATE..];
+        let u16_at = |o: usize| u16::from_le_bytes([st[o], st[o + 1]]);
+        // §14.8: channel flags, latched envelope settings and sample positions.
+        assert_eq!([st[0x04], st[0x12], st[0x20], st[0x28], st[0x34], st[0x39]], [1; 6]);
+        assert_eq!((st[0x04 + 8], st[0x12 + 8], st[0x31]), (0xA3, 0x71, 0xC5));
+        assert_eq!(u16_at(0x04 + 11), 1000, "channel 1's swept rate");
+        assert_eq!((u16_at(0x35), u16_at(0x3A)), (200, 100), "800 samples at 12 and 6 kHz");
+        assert_eq!((hw.r(PCM_A + PCM_POS), hw.r(PCM_B + PCM_POS)), (200, 100));
+        assert!(u16_at(0x29) != 0x7FFF, "the noise register has shifted");
+        assert!(st[0x3E..0x80].iter().all(|&b| b == 0), "reserved");
+        // 800 samples cover ticks 0 to floor(800 × 16384 / 375) − 1 = 34951.
+        assert_eq!((u16_at(0x00), u16_at(0x02)), ((800 * 16384 % 375) as u16, (34952 % 32768) as u16));
     }
 
     #[test]

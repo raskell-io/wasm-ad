@@ -3,26 +3,82 @@
 version = 4
 
 [[package]]
+name = "conf-affine"
+version = "0.3.0"
+dependencies = [
+ "wasm-ad",
+]
+
+[[package]]
+name = "conf-bitmap"
+version = "0.3.0"
+dependencies = [
+ "wasm-ad",
+]
+
+[[package]]
+name = "conf-effects"
+version = "0.3.0"
+dependencies = [
+ "wasm-ad",
+]
+
+[[package]]
+name = "conf-samples"
+version = "0.3.0"
+dependencies = [
+ "wasm-ad",
+]
+
+[[package]]
+name = "conf-sound"
+version = "0.3.0"
+dependencies = [
+ "wasm-ad",
+]
+
+[[package]]
+name = "conf-sprites"
+version = "0.3.0"
+dependencies = [
+ "wasm-ad",
+]
+
+[[package]]
+name = "conf-system"
+version = "0.3.0"
+dependencies = [
+ "wasm-ad",
+]
+
+[[package]]
+name = "conf-tiles"
+version = "0.3.0"
+dependencies = [
+ "wasm-ad",
+]
+
+[[package]]
 name = "hello"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "wasm-ad",
 ]
 
 [[package]]
 name = "twirl"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "wasm-ad",
 ]
 
 [[package]]
 name = "wasm-ad"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "wasm-ad-core",
 ]
 
 [[package]]
 name = "wasm-ad-core"
-version = "0.2.0"
+version = "0.3.0"

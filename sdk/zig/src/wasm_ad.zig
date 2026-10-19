@@ -20,8 +20,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 /// Spec version this SDK targets.
-pub const SPEC = "0.2";
-pub const SPEC_VERSION: u16 = 0x0002;
+pub const SPEC = "0.3";
+pub const SPEC_VERSION: u16 = 0x0003;
 
 pub const SCREEN_W = 240;
 pub const SCREEN_H = 160;
@@ -136,6 +136,10 @@ pub const reg = struct {
     pub const SAVECNT: Reg16 = .{ .addr = 0x70C };
     pub const SAVESTAT: Reg16 = .{ .addr = 0x70E };
     pub const SPEC: Reg16 = .{ .addr = 0x710 };
+    pub const KEYS2: Reg16 = .{ .addr = 0x712 };
+    pub const KEYS3: Reg16 = .{ .addr = 0x714 };
+    pub const KEYS4: Reg16 = .{ .addr = 0x716 };
+    pub const PADS: Reg16 = .{ .addr = 0x718 };
 };
 
 /// `DISPCNT` bits (SPEC.md §6.1).
@@ -664,9 +668,31 @@ pub const pcm = struct {
     }
 };
 
-/// Buttons held this frame.
+/// Buttons held this frame by player 1.
 pub fn keys() u16 {
     return reg.KEYS.read();
+}
+
+/// Buttons held this frame by `player`, 1–4 (SPEC.md §5).
+pub fn keysOf(player: u32) u16 {
+    return switch (player) {
+        1 => reg.KEYS.read(),
+        2 => reg.KEYS2.read(),
+        3 => reg.KEYS3.read(),
+        4 => reg.KEYS4.read(),
+        else => unreachable,
+    };
+}
+
+/// Bits 0–3: which of players 1–4 have a controller.
+pub fn pads() u16 {
+    return reg.PADS.read();
+}
+
+/// Whether `player` (1–4) has a controller. Player 1 always does.
+pub fn connected(player: u32) bool {
+    std.debug.assert(player >= 1 and player <= 4);
+    return pads() & (@as(u16, 1) << @intCast(player - 1)) != 0;
 }
 
 /// Edge detection over `KEYS`; keep one in your game state and call
@@ -676,8 +702,12 @@ pub const Buttons = struct {
     prev: u16 = 0,
 
     pub fn update(b: *Buttons) void {
+        b.updateFor(1);
+    }
+    /// Like `update`, for `player` 1–4.
+    pub fn updateFor(b: *Buttons, player: u32) void {
         b.prev = b.now;
-        b.now = keys();
+        b.now = keysOf(player);
     }
     pub fn held(b: Buttons, k: u16) bool {
         return b.now & k != 0;
@@ -794,7 +824,7 @@ test "fixed trig matches float" {
 }
 
 test "metadata text" {
-    try std.testing.expectEqualStrings("spec=0.2\\ntitle=A \\\"B\\\"\\nauthor=me\\n", metaText(.{ .title = "A \"B\"", .author = "me" }));
+    try std.testing.expectEqualStrings("spec=0.3\\ntitle=A \\\"B\\\"\\nauthor=me\\n", metaText(.{ .title = "A \"B\"", .author = "me" }));
 }
 
 test "sound field builders match spec bits" {
@@ -806,6 +836,12 @@ test "sound field builders match spec bits" {
     try std.testing.expectEqual(@as(u16, 0), sound.length(64));
     try std.testing.expectEqual(@as(u16, 63), sound.length(1));
     try std.testing.expectEqual(@as(u16, 0x1B), sound.noise(3, 1, true));
+}
+
+test "multiplayer registers" {
+    try std.testing.expectEqual(@as(usize, 0x712), reg.KEYS2.addr);
+    try std.testing.expectEqual(@as(usize, 0x716), reg.KEYS4.addr);
+    try std.testing.expectEqual(@as(usize, 0x718), reg.PADS.addr);
 }
 
 test "affine background control bits" {

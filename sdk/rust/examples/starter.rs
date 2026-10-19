@@ -2,8 +2,9 @@
 //! affine background) blended over a backdrop gradient drawn per scanline,
 //! a spinning star you move with the D-pad, and a little tune on all four
 //! sound channels. B goes faster and plays a sample; A toggles mosaic with a
-//! rising blip. It uses integer math only, so every language's build renders
-//! bit-identical frames and sound.
+//! rising blip. A second controller brings in a blue star for player 2. It
+//! uses integer math only, so every language's build renders bit-identical
+//! frames and sound.
 //!
 //!   cargo build --release --target wasm32-unknown-unknown -p wasm-ad --example starter
 
@@ -28,13 +29,24 @@ struct State {
     x: i32,
     y: i32,
     mosaic: bool,
+    p2: Buttons,
+    x2: i32,
+    y2: i32,
 }
 
 // Cart state lives in linear memory, never in WebAssembly globals (SPEC.md §12).
 struct Global(UnsafeCell<State>);
 // SAFETY: wasm32-unknown-unknown is single-threaded.
 unsafe impl Sync for Global {}
-static STATE: Global = Global(UnsafeCell::new(State { buttons: Buttons::new(), x: 112, y: 72, mosaic: false }));
+static STATE: Global = Global(UnsafeCell::new(State {
+    buttons: Buttons::new(),
+    x: 112,
+    y: 72,
+    mosaic: false,
+    p2: Buttons::new(),
+    x2: 40,
+    y2: 72,
+}));
 
 fn state() -> &'static mut State {
     unsafe { &mut *STATE.0.get() }
@@ -61,6 +73,9 @@ pub extern "C" fn start() {
     let obj = obj_palette();
     obj[1] = rgb(255, 216, 64);
     obj[2] = rgb(232, 96, 32);
+    // Player 2's star: the same tiles in palette bank 1.
+    obj[17] = rgb(96, 200, 255);
+    obj[18] = rgb(40, 80, 220);
     let star = obj_tiles();
     for y in 0..16i32 {
         for x in 0..16i32 {
@@ -144,6 +159,20 @@ pub extern "C" fn update() {
     oam::set_affine(0, AffineMatrix::rotate_scale_fixed(t * 2, scale, scale));
     let star = Sprite::new(s.x, s.y, SpriteSize::S16x16, 0).affine(0, true);
     oam::set(0, if s.mosaic { star.mosaic() } else { star });
+
+    // Player 2 joins when a second controller connects (SPEC.md §5).
+    if connected(2) {
+        s.p2.update_for(2);
+        if s.p2.held(key::LEFT) { s.x2 -= 1 }
+        if s.p2.held(key::RIGHT) { s.x2 += 1 }
+        if s.p2.held(key::UP) { s.y2 -= 1 }
+        if s.p2.held(key::DOWN) { s.y2 += 1 }
+        s.x2 = s.x2.clamp(0, 240 - 32);
+        s.y2 = s.y2.clamp(0, 160 - 32);
+        oam::set(1, Sprite::new(s.x2, s.y2, SpriteSize::S16x16, 0).bank(1).affine(0, true));
+    } else {
+        oam::hide(1);
+    }
 }
 
 /// Raster effect: a new backdrop color on every line.

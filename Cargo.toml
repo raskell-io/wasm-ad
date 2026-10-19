@@ -1,9 +1,22 @@
 [workspace]
 resolver = "3"
-members = ["core", "sdk/rust", "carts/hello", "carts/twirl"]
+members = [
+    "core",
+    "sdk/rust",
+    "carts/hello",
+    "carts/twirl",
+    "conformance/carts/tiles",
+    "conformance/carts/effects",
+    "conformance/carts/sprites",
+    "conformance/carts/bitmap",
+    "conformance/carts/affine",
+    "conformance/carts/sound",
+    "conformance/carts/samples",
+    "conformance/carts/system",
+]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.93"
 license = "MIT"

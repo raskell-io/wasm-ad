@@ -1,6 +1,6 @@
 {
   "name": "@raskell/wasm-ad",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AssemblyScript SDK for writing WASM-AD carts",
   "license": "MIT",
   "repository": {

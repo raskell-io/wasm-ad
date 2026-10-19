@@ -1,0 +1,281 @@
+{
+  "spec": "0.3",
+  "hashes": {
+    "frame": "SHA-256 of the frame as RGBA8 bytes, 240 × 160, rows top to bottom (alpha 255); first 16 hex digits",
+    "sound": "SHA-256 of the sound of every frame in order, as i16 little-endian stereo pairs, left first; first 16 hex digits"
+  },
+  "tests": [
+    {
+      "name": "tiles",
+      "sections": [
+        "6.1",
+        "6.2",
+        "6.4",
+        "8.1",
+        "8.2",
+        "10.2"
+      ],
+      "cart": "wasm/tiles.wasm",
+      "replay": "replays/tiles.wadreplay",
+      "frames": {
+        "0": "7e44cffdbd0f4316",
+        "11": "cb57fdeafd596a31",
+        "29": "379eefee007a20d3",
+        "30": "2de48d90a4cfa7c4",
+        "41": "ab6b0bd655d2376b",
+        "59": "06b012d344aa1760",
+        "60": "c8194b2e6ae51cbb",
+        "71": "2f68d7ca778f4899",
+        "89": "01fc7487a664fa64",
+        "90": "f60ac1ddb6a4297d",
+        "101": "89b4484091da03f4",
+        "119": "3f9572dfaea499b4",
+        "120": "a89269012056c774",
+        "131": "b4086d88773ea233",
+        "149": "10f85ffda1a68188",
+        "150": "9716642c39d4d202",
+        "161": "8506771960dbf495",
+        "179": "82e1f90c22b8a3ea"
+      },
+      "sound": "30fafbdc0facf210"
+    },
+    {
+      "name": "effects",
+      "sections": [
+        "6.3",
+        "6.5",
+        "9.1",
+        "10"
+      ],
+      "cart": "wasm/effects.wasm",
+      "replay": "replays/effects.wadreplay",
+      "frames": {
+        "0": "a85ac4e1925d518c",
+        "11": "22c12d68703457ab",
+        "29": "0fd7d3eaffb3969a",
+        "30": "bd2f45f78ce4eed1",
+        "41": "c3e6bbe862c0ebae",
+        "59": "0a4e8c01089e68ad",
+        "60": "acd63744b1947c85",
+        "71": "03233350c3ad90c7",
+        "89": "d4fa084e0599a69a",
+        "90": "706333383ea2c634",
+        "101": "07afdce55338a9db",
+        "119": "15132440da26fd86",
+        "120": "b7e163c9ff53df06",
+        "131": "aef4ff73511a28e3",
+        "149": "3f1ec35579a89736",
+        "150": "c4091db183efc400",
+        "161": "c4091db183efc400",
+        "179": "240723e03957fffb"
+      },
+      "sound": "30fafbdc0facf210"
+    },
+    {
+      "name": "sprites",
+      "sections": [
+        "9",
+        "6.4"
+      ],
+      "cart": "wasm/sprites.wasm",
+      "replay": "replays/sprites.wadreplay",
+      "frames": {
+        "0": "da40440541d5e7e4",
+        "11": "bb7abb5f7f5e9e05",
+        "29": "28ead084da5e4f9f",
+        "30": "32fedbc4b6d68cb5",
+        "41": "abd0d8abbf98e360",
+        "59": "66531bc6f7362209",
+        "60": "031047328b9aff0f",
+        "71": "ae81c14c7ad015c3",
+        "89": "bff5e1876a5912f2",
+        "90": "80437d8b83c85ebb",
+        "101": "1f35465f8f911f5d",
+        "119": "ffb8544492860a9e",
+        "120": "a1e2b6ef63423e4b",
+        "131": "f81a3ea8b58f4962",
+        "149": "68b95c0587640747",
+        "150": "793126e37dec25aa",
+        "161": "5bdfccee41c46fd1",
+        "179": "0c0fcf66372b8314"
+      },
+      "sound": "30fafbdc0facf210"
+    },
+    {
+      "name": "bitmap",
+      "sections": [
+        "8.3",
+        "9"
+      ],
+      "cart": "wasm/bitmap.wasm",
+      "replay": "replays/bitmap.wadreplay",
+      "frames": {
+        "0": "5f115d8cd028baf3",
+        "11": "49270f890f37f10a",
+        "29": "abde2509ccd37b21",
+        "30": "323cc7a5cc7f357b",
+        "41": "636b142653c36182",
+        "59": "4ad9cc79a07c5b2a",
+        "60": "96e08c566a276ca1",
+        "71": "4d7dc3ca437660a6",
+        "89": "33f71d93b01ec5a0",
+        "90": "b3077ee0b706bcde",
+        "101": "7288a6ddb651dd39",
+        "119": "181541a69df28dd6"
+      },
+      "sound": "fec9afb531a8e036"
+    },
+    {
+      "name": "affine",
+      "sections": [
+        "6.1",
+        "6.2",
+        "8.4",
+        "3.2"
+      ],
+      "cart": "wasm/affine.wasm",
+      "replay": "replays/affine.wadreplay",
+      "frames": {
+        "0": "9b4a9ac2d5903bf2",
+        "11": "292761d520dcbb1c",
+        "29": "5584a670b04762c6",
+        "30": "d7a24ea7d01c8485",
+        "41": "55862e103d272539",
+        "59": "2b63e4c83aa2a561",
+        "60": "06cc9fe3818420a6",
+        "71": "7c88813af3f8f05e",
+        "89": "938ec2a14ea58bf1",
+        "90": "50c0d769916b5c65",
+        "101": "19477604bd0bf2ca",
+        "119": "05746255b7cc91d5",
+        "120": "d26bf028f4bee823",
+        "131": "48efaf432460bf93",
+        "149": "48efaf432460bf93"
+      },
+      "sound": "baf1862a3e57a773"
+    },
+    {
+      "name": "sound",
+      "sections": [
+        "14.1",
+        "14.2",
+        "14.3",
+        "14.4",
+        "14.5",
+        "14.7",
+        "14.8"
+      ],
+      "cart": "wasm/sound.wasm",
+      "replay": "replays/sound.wadreplay",
+      "frames": {
+        "0": "cd964ac92e621b26",
+        "11": "3f26319dcf316ce9",
+        "29": "b9f62a9b22a2d7d6",
+        "30": "4b37a5adc261f918",
+        "41": "383f18d101dacaa3",
+        "59": "ae2150203178247a",
+        "60": "e26861e425161d10",
+        "71": "4d14407412abf3e9",
+        "89": "3d2dc426b980575e",
+        "90": "5478d109b16eb8a4",
+        "101": "ea400a42e93fc2de",
+        "119": "50e8e68b44c36d30",
+        "120": "2d5478fd652132a8",
+        "131": "107e8334611ebc61",
+        "149": "a1f6133e2c1fd6c5",
+        "150": "43465480eee6b4f9",
+        "161": "cabf3873a0a7a390",
+        "179": "93c705070f62ab1b"
+      },
+      "sound": "3f2d733e1fe15f01"
+    },
+    {
+      "name": "samples",
+      "sections": [
+        "14.6",
+        "14.7"
+      ],
+      "cart": "wasm/samples.wasm",
+      "replay": "replays/samples.wadreplay",
+      "frames": {
+        "0": "60127a013fedb04f",
+        "11": "e9f68bd6aff40321",
+        "29": "78f859e31c639e9f",
+        "30": "58c033908bf7e524",
+        "41": "f087a74d3852bf45",
+        "59": "7d648e7b1fe299d9",
+        "60": "18fe7d13dcf35887",
+        "71": "32bc80d18cac7264",
+        "89": "a38b67e12e968a5e",
+        "90": "d2df6ee73a6b49d5",
+        "101": "8c8dabeb136ee579",
+        "119": "0b8a80706e316c9a"
+      },
+      "sound": "a1172d0383b0e124"
+    },
+    {
+      "name": "system",
+      "sections": [
+        "3.1",
+        "3.2",
+        "5",
+        "11",
+        "12"
+      ],
+      "cart": "wasm/system.wasm",
+      "replay": "replays/system.wadreplay",
+      "frames": {
+        "0": "a952f1aa4a56a36d",
+        "5": "b168fa01b367df92",
+        "10": "94c6ad3d5388fddd",
+        "15": "c091e71a75a7cda9",
+        "20": "76c0ab923c93f2fb",
+        "25": "c98a0706088ebe03",
+        "30": "4cd52da7cfe4ea8b",
+        "35": "69f24d56f0ad506a",
+        "40": "0850baaa2fb2a469",
+        "45": "95bb94c30af4569e",
+        "50": "c6ce2541b4367eac",
+        "55": "434eaef9bc03d0a5",
+        "60": "1a3b33e7a04cbf41",
+        "65": "ddf997713910f346",
+        "70": "225b5a9f4c024e35",
+        "75": "1dc94b4e4fb17cc5",
+        "80": "ff9810cb6b2763b6",
+        "85": "ffb82ba015c0d7f5",
+        "90": "537112e1d6a0a756",
+        "95": "6b4881ce70c081b4",
+        "100": "1a5e1c086424ef19",
+        "105": "e8bb8f4277099f3d",
+        "110": "67e8aa6b8694600c",
+        "115": "7086511f240d43b4"
+      },
+      "sound": "fec9afb531a8e036"
+    },
+    {
+      "name": "system-saved",
+      "sections": [
+        "3.1",
+        "11",
+        "12"
+      ],
+      "cart": "wasm/system.wasm",
+      "replay": "replays/system-saved.wadreplay",
+      "frames": {
+        "0": "dc1de0ca163a272f",
+        "5": "16143e35b4ec35db",
+        "10": "6951ffd6f60a0fba",
+        "15": "ad0b3d0d6a563332",
+        "20": "ac2588098f7efae7",
+        "25": "816fd54f6415daf2",
+        "30": "48006518a22a8d07",
+        "35": "87b1efe901b4428c",
+        "40": "6014de19f926f94a",
+        "45": "7a9ac9bbd82b11d8",
+        "50": "8e5acaedc4516b62",
+        "55": "c18fccd258c85b6c"
+      },
+      "sound": "ea0787f65f73b001"
+    }
+  ]
+}

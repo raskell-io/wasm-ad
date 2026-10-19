@@ -2,9 +2,9 @@
  * The starter cart, the same in every SDK: a rotating checkerboard (an affine
  * background) blended over a backdrop gradient drawn per scanline, a spinning
  * star you move with the D-pad, and a little tune on all four sound channels.
- * B goes faster and plays a sample; A toggles mosaic with a rising blip. It
- * uses integer math only, so every language's build renders bit-identical
- * frames and sound.
+ * B goes faster and plays a sample; A toggles mosaic with a rising blip. A
+ * second controller brings in a blue star for player 2. It uses integer math
+ * only, so every language's build renders bit-identical frames and sound.
  *
  * Also valid C++; the Makefile builds it both ways.
  */
@@ -24,7 +24,9 @@ static struct {
     wad_buttons buttons;
     int32_t x, y;
     bool mosaic;
-} state = {{0, 0}, 112, 72, false};
+    wad_buttons p2;
+    int32_t x2, y2;
+} state = {{0, 0}, 112, 72, false, {0, 0}, 40, 72};
 
 static int32_t abs32(int32_t v) { return v < 0 ? -v : v; }
 static int32_t min32(int32_t a, int32_t b) { return a < b ? a : b; }
@@ -55,6 +57,9 @@ WAD_EXPORT(start) void start(void) {
     /* A 16×16 star in four 1D-mapped sprite tiles. */
     wad_obj_palette[1] = wad_rgb(255, 216, 64);
     wad_obj_palette[2] = wad_rgb(232, 96, 32);
+    /* Player 2's star: the same tiles in palette bank 1. */
+    wad_obj_palette[17] = wad_rgb(96, 200, 255);
+    wad_obj_palette[18] = wad_rgb(40, 80, 220);
     for (int32_t y = 0; y < 16; y++) {
         for (int32_t x = 0; x < 16; x++) {
             int32_t dx = abs32(x * 2 - 15), dy = abs32(y * 2 - 15);
@@ -129,6 +134,20 @@ WAD_EXPORT(update) void update(void) {
     wad_oam_set_affine(0, wad_affine_rotate_scale(t * 2, scale, scale));
     wad_sprite star = wad_sprite_affine(wad_sprite_new(state.x, state.y, WAD_S16x16, 0), 0, true);
     wad_oam_set(0, state.mosaic ? wad_sprite_mosaic(star) : star);
+
+    /* Player 2 joins when a second controller connects (SPEC.md §5). */
+    if (wad_connected(2)) {
+        wad_buttons_update_for(&state.p2, 2);
+        if (wad_held(&state.p2, WAD_KEY_LEFT)) state.x2 -= 1;
+        if (wad_held(&state.p2, WAD_KEY_RIGHT)) state.x2 += 1;
+        if (wad_held(&state.p2, WAD_KEY_UP)) state.y2 -= 1;
+        if (wad_held(&state.p2, WAD_KEY_DOWN)) state.y2 += 1;
+        state.x2 = clamp32(state.x2, 0, 240 - 32);
+        state.y2 = clamp32(state.y2, 0, 160 - 32);
+        wad_oam_set(1, wad_sprite_affine(wad_sprite_bank(wad_sprite_new(state.x2, state.y2, WAD_S16x16, 0), 1), 0, true));
+    } else {
+        wad_oam_hide(1);
+    }
 }
 
 /* Raster effect: a new backdrop color on every line. */

@@ -7,7 +7,7 @@ linker options a cart needs.
 ## Build the starter
 
 ```sh
-zig build            # zig-out/bin/starter.wasm (≈2.5 KB, ReleaseSmall)
+zig build            # zig-out/bin/starter.wasm (≈2.9 KB, ReleaseSmall)
 zig build test       # unit tests for the SDK's pure helpers
 ```
 
@@ -18,9 +18,9 @@ node tools/wasmad.mjs check sdk/zig/zig-out/bin/starter.wasm
 ```
 
 [`examples/starter.zig`](examples/starter.zig) is the cart every SDK ships, a
-rotating affine checkerboard, a spinning star and a tune on every sound
-channel: it renders bit-identical frames and sound to the Rust one
-(`make sdk-test`).
+rotating affine checkerboard, a spinning star, a tune on every sound channel
+and a second star for player 2: it renders bit-identical frames and sound to
+the Rust one (`make sdk-test`).
 
 ## A new cart
 
@@ -92,7 +92,7 @@ stack pointer.
 ## Metadata
 
 `ad.cart(.{ ... })` writes the `wasm-ad` custom section (§2.3) at compile time:
-`spec=0.2` first, then each field as `key=value`. `title` is required; values
+`spec=0.3` first, then each field as `key=value`. `title` is required; values
 must be one line. Zig has no direct way to emit a custom section, so the SDK
 uses global assembly with a `.custom_section.wasm-ad` section, which LLVM's
 wasm assembler turns into one. No post-build step is needed.
@@ -124,6 +124,39 @@ ad.reg.BGCNT[2].write((ad.BgCnt{}).screenBlock(8).affineSize(.s32x32).wrap().bit
 ad.setBgAffine(2, .rotateScaleFixed(angle, 256, 256), 128, 128, 120, 80);
 ```
 
+## Players
+
+`KEYS` is player 1; players 2–4 read `KEYS2`–`KEYS4`, and `PADS` says which
+of them have a controller (SPEC.md §5).
+
+```zig
+if (ad.connected(2)) {
+    state.p2.updateFor(2);
+    if (state.p2.held(ad.key.RIGHT)) state.x2 += 1;
+}
+```
+
+## Icons
+
+A cart can carry a 32×32 icon that hosts show next to its title (SPEC.md
+§2.5). Add it after building, from a PNG with at most 15 colors plus
+transparency:
+
+```sh
+node path/to/wasm-ad/tools/wasmad.mjs icon zig-out/bin/cart.wasm icon.png
+```
+
+## Replays and save states
+
+Hosts can record replays and save states that load in any host
+([FORMATS.md](../../FORMATS.md)). From the command line:
+
+```sh
+node tools/wasmad.mjs run cart.wasm --frames 600 --keys 0-59:right --record run.wadreplay
+node tools/wasmad.mjs run cart.wasm --replay run.wadreplay --save-state end.wadstate
+node tools/wasmad.mjs run cart.wasm --state end.wadstate --frames 60 --ppm out.ppm
+```
+
 ## API
 
 | | |
@@ -141,8 +174,9 @@ ad.setBgAffine(2, .rotateScaleFixed(angle, 256, 256), 128, 128, 120, 80);
 | `oam.set(i, sprite)`, `oam.hide(i)`, `oam.setAffine(slot, m)` | OAM |
 | `AffineMatrix.rotateScale(rad, sx, sy)` | Float; `.rotateScaleFixed(angle, sx, sy)` is the integer version every SDK shares |
 | `fixed.sin(a)`, `fixed.cos(a)` | Angle in 1/256 turns, result in Q14 |
-| `Buttons` | `.update()` each frame, then `.held(k)`, `.pressed(k)` |
+| `Buttons` | `.update()` each frame (or `.updateFor(player)`), then `.held(k)`, `.pressed(k)` |
 | `keys()`, `frame()`, `seed()` | System registers |
+| `keysOf(player)`, `pads()`, `connected(player)` | Players 1–4: `reg.KEYS2`–`reg.KEYS4`, `reg.PADS` |
 | `saveRam()`, `saveRestored()`, `requestSave()` | 32 KB save RAM (§11) |
 | `trace(msg)` | Host debug log; imports `env.trace` only if you call it |
 | `reg.SOUND1CNT_L` … `reg.SOUNDCNT_X`, `reg.PCMA_*`, `reg.PCMB_*` | Sound registers |

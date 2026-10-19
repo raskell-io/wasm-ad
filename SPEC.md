@@ -1,4 +1,4 @@
-# WASM-AD Specification, version 0.2 (draft)
+# WASM-AD Specification, version 0.3 (draft)
 
 WASM-AD is a fantasy console whose games are WebAssembly modules. Its video
 hardware follows the Game Boy Advance: a 240×160 display composed from tiled
@@ -46,7 +46,7 @@ are useful further reading.
 | Effects | alpha blending, brightness fades, two rectangular windows and a sprite window, mosaic |
 | Raster effects | optional per-scanline callback |
 | Sound | 48 kHz stereo: two square, one wave and one noise channel, two 8-bit sample channels |
-| Input | 10 buttons: D-pad, A, B, L, R, Start, Select |
+| Input | 10 buttons: D-pad, A, B, L, R, Start, Select; up to four players |
 | Save | 32 KB battery-backed save RAM |
 | Cart | one `.wasm` file, at most 32 MiB |
 
@@ -84,7 +84,7 @@ A cart MUST contain a custom section named `wasm-ad` holding UTF-8 text, one
 
 | Key | | |
 |---|---|---|
-| `spec` | required | Spec version the cart targets, e.g. `0.2`. |
+| `spec` | required | Spec version the cart targets, e.g. `0.3`. |
 | `title` | required | Display name. Hosts key save data by `title` and `author`. |
 | `author` | optional | |
 | `version` | optional | The cart's own version. |
@@ -95,6 +95,18 @@ A cart MUST contain a custom section named `wasm-ad` holding UTF-8 text, one
 
 A cart file MUST NOT exceed 32 MiB. Hosts MUST allow linear memory to grow to
 at least 16 MiB and MAY refuse growth beyond that.
+
+### 2.5 Icon
+
+A cart MAY contain a custom section named `wasm-ad-icon` holding a 32×32
+icon that hosts show next to its title. It is exactly 544 bytes:
+
+| Offset | Size | |
+|---|---|---|
+| 0 | 32 | 16 colors, u16 RGB555 each (§7); color 0 is transparent |
+| 32 | 512 | 32 rows of 16 bytes, top to bottom; two pixels per byte, left pixel in the low nibble |
+
+Hosts MUST ignore an icon section of any other size.
 
 ## 3. Lifecycle and timing
 
@@ -111,7 +123,8 @@ at least 16 MiB and MAY refuse growth beyond that.
 
 The host runs 60 frames per second. Each frame:
 
-1. The host writes `KEYS` and `FRAME`, and sets `VCOUNT` to 160.
+1. The host writes `KEYS`, `KEYS2`–`KEYS4`, `PADS` and `FRAME`, and sets
+   `VCOUNT` to 160.
 2. The host calls `update()`.
 3. The host latches VRAM and OAM, and runs the frame's sound (§14.2). Writes
    to VRAM, OAM and the sound registers after this point take effect on the
@@ -156,10 +169,18 @@ These registers have no GBA counterpart.
 | 0x708 | `SEED` | u32 | host | Random value fixed at boot; the only entropy source (§12). |
 | 0x70C | `SAVECNT` | u16 | cart | Bit 0: request that save RAM be persisted after this frame. The host clears it. |
 | 0x70E | `SAVESTAT` | u16 | host | Bit 0: save RAM was restored from storage at boot. |
-| 0x710 | `SPEC` | u16 | host | Spec version the host implements: major × 256 + minor (0.2 → 0x0002). |
+| 0x710 | `SPEC` | u16 | host | Spec version the host implements: major × 256 + minor (0.3 → 0x0003). |
+| 0x712 | `KEYS2` | u16 | host | Buttons held by player 2. |
+| 0x714 | `KEYS3` | u16 | host | Buttons held by player 3. |
+| 0x716 | `KEYS4` | u16 | host | Buttons held by player 4. |
+| 0x718 | `PADS` | u16 | host | Bits 0–3: players 1–4 have a controller. Bit 0 is set in every frame; like the other input registers, it is 0 during `start`. |
 
 `KEYS` bits, in GBA order: 0 A, 1 B, 2 Select, 3 Start, 4 Right, 5 Left,
 6 Up, 7 Down, 8 R, 9 L. Unlike the GBA's `KEYINPUT`, a set bit means pressed.
+
+`KEYS` is player 1. Hosts assign further controllers to players 2–4 in the
+order they connect; a player without a controller reads 0. A cart SHOULD let
+players join and leave by watching `PADS`.
 
 ## 6. Display registers
 
@@ -463,10 +484,12 @@ SHOULD let users export and import save files as raw 32 KB images.
 
 ## 12. Determinism and save states
 
-A cart's behavior is a function of its initial state, `SEED` and the
-sequence of `KEYS` values. It has no access to wall-clock time or any other
-entropy. Hosts MUST call `update` exactly once per frame as described in
-§3.2, so a recorded seed and input sequence replays exactly.
+A cart's behavior is a function of its initial state, `SEED`, the save RAM
+restored at boot, and the sequence of `KEYS`, `KEYS2`–`KEYS4` and `PADS`
+values. It has no access to wall-clock time or any other entropy. Hosts MUST
+call `update` exactly once per frame as described in §3.2, so a recorded seed
+and input sequence replays exactly. FORMATS.md defines a replay file for
+sharing such recordings.
 
 Sound output is likewise a function of memory (§14), so a recorded seed and
 input sequence also reproduce the sound sample for sample.
@@ -476,7 +499,8 @@ empty, so the stack pointer is back at its initial value. That includes the
 sound hardware's state, which the host keeps in memory (§14.8). A host MAY
 implement save states, rewind and netplay by snapshotting linear memory
 between frames. Carts MUST NOT keep state in mutable WebAssembly globals
-other than the stack pointer.
+other than the stack pointer. FORMATS.md defines a save state file that any
+host can load.
 
 ## 13. Toolchain notes
 
@@ -712,17 +736,46 @@ repeat whole frames of output to stay in step with real time.
 
 ### 14.8 Sound state
 
-The channels' internal state (timers, counters, positions, the shift
-register, the frame sequencer's place) is kept by the host in memory at
-0x780–0x7FF, in a layout of the host's choosing, so that a snapshot of
-linear memory includes it (§12). At boot it is zero, which means every
-channel is off at tick 0. Carts MUST NOT read or write it.
+The channels' internal state is kept by the host in memory at 0x780–0x7FF,
+so that a snapshot of linear memory includes it (§12) and moves between
+hosts. At boot it is zero, which means every channel is off at tick 0. Carts
+MUST NOT read or write it. Hosts MUST use this layout (offsets from 0x780,
+little-endian, no padding; flags are 0 or 1):
+
+| Offset | Size | |
+|---|---|---|
+| 0x00 | u16 | (k × 16384) mod 375, for the next output sample k (§14.1) |
+| 0x02 | u16 | The next tick's number, mod 32768 |
+| 0x04 | 14 | Channel 1, below |
+| 0x12 | 14 | Channel 2, below |
+| 0x20 | u8 | Channel 3: on |
+| 0x21 | u8 | Channel 3: position, 0–63 |
+| 0x22 | u32 | Channel 3: ticks left in the current sample |
+| 0x26 | u16 | Channel 3: length counter |
+| 0x28 | u8 | Channel 4: on |
+| 0x29 | u16 | Channel 4: shift register |
+| 0x2B | u32 | Channel 4: ticks left until the next shift |
+| 0x2F | u16 | Channel 4: length counter |
+| 0x31 | 3 | Channel 4: envelope, below |
+| 0x34 | 5 | Sample channel A: on (u8), position (u16), accumulator (u16) |
+| 0x39 | 5 | Sample channel B, the same |
+| 0x3E | 66 | Reserved, zero |
+
+A square channel's 14 bytes: on (u8), duty step 0–7 (u8), ticks left in the
+step (u32), length counter (u16), envelope (3 bytes), swept rate F (u16),
+sweep countdown (u8). An envelope's 3 bytes: bits 8–15 of the envelope
+register latched at start (u8), volume V (u8), countdown (u8).
 
 ## 15. Reserved for future versions
 
-- Cart icons in the `wasm-ad` custom section.
+Nothing is reserved at present.
 
 ## 16. Changes
+
+**0.3**: up to four players (`KEYS2`–`KEYS4`, `PADS`, §5); cart icons (§2.5);
+the sound state layout is fixed (§14.8), so save states move between hosts;
+FORMATS.md defines replay and save state files. A 0.2 cart runs unchanged on
+a 0.3 host.
 
 **0.2**: sound (§14) and sample RAM; affine backgrounds and video modes 1 and
 2 (§8.4); the host initializes the BG2 and BG3 matrices at boot. A 0.1 cart

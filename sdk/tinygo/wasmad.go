@@ -35,7 +35,7 @@ const (
 	AddrCart    = 0x28000 // first address the cart may use
 
 	ObjHidden   = 0x0200 // OAM attribute 0 that hides a sprite
-	SpecVersion = 0x0002
+	SpecVersion = 0x0003
 )
 
 // Reg16 is a 16-bit hardware register.
@@ -109,6 +109,10 @@ const (
 	SAVECNT  Reg16 = 0x70C
 	SAVESTAT Reg16 = 0x70E
 	SPEC     Reg16 = 0x710
+	KEYS2    Reg16 = 0x712 // player 2's buttons (SPEC.md §5)
+	KEYS3    Reg16 = 0x714
+	KEYS4    Reg16 = 0x716
+	PADS     Reg16 = 0x718 // bits 0–3: players 1–4 have a controller
 )
 
 // BGCNT returns background bg's control register (bg 0–3).
@@ -564,16 +568,37 @@ func PCMPosition(ch int) uint16 { return Reg16(pcmBase(ch) + 0xA).Read() }
 // PCMPlaying reports whether channel ch is playing.
 func PCMPlaying(ch int) bool { return SoundStatus()&(1<<(4+ch)) != 0 }
 
-// Keys returns the buttons held this frame.
+// Keys returns the buttons held this frame by player 1.
 func Keys() uint16 { return KEYS.Read() }
+
+// KeysOf returns the buttons held this frame by player 1–4 (SPEC.md §5),
+// or 0 for any other player number.
+func KeysOf(player int) uint16 {
+	switch {
+	case player == 1:
+		return KEYS.Read()
+	case player >= 2 && player <= 4:
+		return Reg16(0x712 + (player-2)*2).Read()
+	}
+	return 0
+}
+
+// Pads returns which of players 1–4 have a controller, in bits 0–3.
+func Pads() uint16 { return PADS.Read() }
+
+// Connected reports whether player 1–4 has a controller. Player 1 always does.
+func Connected(player int) bool { return player >= 1 && player <= 4 && Pads()&(1<<(player-1)) != 0 }
 
 // Buttons does edge detection over KEYS; keep one in your game state and
 // call Update at the start of every frame.
 type Buttons struct{ held, prev uint16 }
 
-func (b *Buttons) Update() {
+func (b *Buttons) Update() { b.UpdateFor(1) }
+
+// UpdateFor is Update for player 1–4.
+func (b *Buttons) UpdateFor(player int) {
 	b.prev = b.held
-	b.held = Keys()
+	b.held = KeysOf(player)
 }
 func (b *Buttons) Held(k uint16) bool { return b.held&k != 0 }
 

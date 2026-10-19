@@ -34,7 +34,7 @@ extern "C" {
  * double quotes, backslashes or newlines.
  */
 #define WAD_CART(...) \
-    __asm__(".section \".custom_section.wasm-ad\",\"\",@\n.ascii \"spec=0.2\\n\"\n" __VA_ARGS__)
+    __asm__(".section \".custom_section.wasm-ad\",\"\",@\n.ascii \"spec=0.3\\n\"\n" __VA_ARGS__)
 #define WAD_META(key, value) ".ascii \"" key "=" value "\\n\"\n"
 #define WAD_TITLE(v) WAD_META("title", v)
 #define WAD_AUTHOR(v) WAD_META("author", v)
@@ -131,6 +131,10 @@ extern "C" {
 #define WAD_SAVECNT WAD_REG16(0x70C)
 #define WAD_SAVESTAT WAD_REG16(0x70E)
 #define WAD_SPEC WAD_REG16(0x710)
+#define WAD_KEYS2 WAD_REG16(0x712)
+#define WAD_KEYS3 WAD_REG16(0x714)
+#define WAD_KEYS4 WAD_REG16(0x716)
+#define WAD_PADS WAD_REG16(0x718)
 
 /* DISPCNT bits (§6.1). */
 #define WAD_MODE0 0x0000u
@@ -501,16 +505,40 @@ static inline bool wad_pcm_playing(unsigned ch) { return (wad_sound_status() & (
 
 /* ---- Input, time and entropy (§5, §12) -------------------------------------- */
 
+/* Buttons held this frame by player 1 (KEYS). */
+static inline uint16_t wad_keys(void) { return WAD_KEYS; }
+
+/* Buttons held this frame by `player`, 1–4 (§5); 0 for any other number. */
+static inline uint16_t wad_keys_of(unsigned player) {
+    switch (player) {
+    case 1: return WAD_KEYS;
+    case 2: return WAD_KEYS2;
+    case 3: return WAD_KEYS3;
+    case 4: return WAD_KEYS4;
+    default: return 0;
+    }
+}
+
+/* Bits 0–3: which of players 1–4 have a controller. */
+static inline uint16_t wad_pads(void) { return WAD_PADS; }
+
+/* Whether `player` (1–4) has a controller. Player 1 always does. */
+static inline bool wad_connected(unsigned player) {
+    return player >= 1 && player <= 4 && (WAD_PADS & (1u << (player - 1))) != 0;
+}
+
 /* Edge detection over KEYS; keep one in your cart state and call
- * wad_buttons_update at the start of every frame. */
+ * wad_buttons_update (or wad_buttons_update_for) at the start of every frame. */
 typedef struct {
     uint16_t held, prev;
 } wad_buttons;
 
-static inline void wad_buttons_update(wad_buttons *b) {
+/* Like wad_buttons_update, for `player` 1–4. */
+static inline void wad_buttons_update_for(wad_buttons *b, unsigned player) {
     b->prev = b->held;
-    b->held = WAD_KEYS;
+    b->held = wad_keys_of(player);
 }
+static inline void wad_buttons_update(wad_buttons *b) { wad_buttons_update_for(b, 1); }
 static inline bool wad_held(const wad_buttons *b, uint16_t keys) {
     return (b->held & keys) != 0;
 }

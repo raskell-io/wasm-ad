@@ -6,18 +6,21 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { boot, check, hash, parseKeys } from '../tools/wasmad.mjs';
+import { boot, check, decodeReplay, hash } from '../tools/wasmad.mjs';
 
-const KEYS = parseKeys('0-29:right,30-59:down+b,60:a,61-90:left,91-120:up+b');
-const MARKS = [0, 29, 60, 61, 100, 120];
+// The input: a replay not tied to any cart (FORMATS.md), recorded with
+//   wasmad run <starter> --frames 121 --unbound --record sdk/starter.wadreplay \
+//     --keys '0-29:right,30-59:down+b+right@2,60:a,61-90:left+up@2,91-120:up+b+down@2+left@2'
+const REPLAY = decodeReplay(readFileSync(new URL('starter.wadreplay', import.meta.url)));
+const MARKS = [0, 29, 45, 60, 61, 100, 120];
 const core = fileURLToPath(new URL('../player/web/core.wasm', import.meta.url));
 
 async function hashes(bytes) {
   const traces = [];
-  const host = await boot(bytes, { core, seed: 1, onTrace: (m) => traces.push(m) });
+  const host = await boot(bytes, { core, seed: REPLAY.seed, save: REPLAY.save, onTrace: (m) => traces.push(m) });
   const out = [], sound = [];
   for (let f = 0; f <= MARKS.at(-1); f++) {
-    const pixels = host.frame(KEYS(f));
+    const pixels = host.frame(REPLAY.inputs[f]);
     sound.push(host.sound);
     if (MARKS.includes(f)) out.push(hash(pixels));
   }

@@ -15,8 +15,9 @@ supports Go up to 1.27), and Node 18+ for the metadata step:
 ```
 
 The starter is the same cart as every other SDK's, with the same frames and
-sound: a rotating checkerboard on an affine background, a star you move, and
-a tune on all four sound channels.
+sound: a rotating checkerboard on an affine background, a star you move, a
+tune on all four sound channels, and a blue star for player 2 when a second
+controller connects.
 
 Set `TINYGO=/path/to/tinygo` if it is not on your `PATH`. Drop the `.wasm` into
 the player, or run it headlessly from the repository root:
@@ -54,7 +55,7 @@ In your own module, require the SDK and copy its TinyGo target:
 
 ```sh
 go mod init example.com/mycart
-go mod edit -require=github.com/raskell-io/wasm-ad/sdk/tinygo@v0.2.0
+go mod edit -require=github.com/raskell-io/wasm-ad/sdk/tinygo@v0.3.0
 go mod download github.com/raskell-io/wasm-ad/sdk/tinygo
 cp "$(go list -m -f '{{.Dir}}' github.com/raskell-io/wasm-ad/sdk/tinygo)/wasm-ad.json" .
 ```
@@ -108,7 +109,7 @@ Two rules follow from how a host runs a cart (§3.1, §12):
 | Math | `Sin`, `Cos` (angle in 1/256 turns, result in Q14), `RotateScaleFixed(angle, sx, sy)`: the same tables and rounding as every other SDK |
 | Sound | `SoundEnable`, `SoundDisable`, `SoundStart`, `SoundLength`, `Duty12` … `Duty75`, `Wave*`, `SoundRate(hz)`, `SoundSweep`, `SoundEnvelope`, `SoundLengthTicks`, `SoundNoise`, `WaveRAM()`, `SampleRAM()`, `SoundStatus()` |
 | Samples | `PCMPlay`, `PCMPlayLooped`, `PCMStop`, `PCMPosition`, `PCMPlaying`, channels `PCMA` and `PCMB` |
-| Input | `Keys()`, `Buttons` with `Update`, `Held`, `Pressed` |
+| Input | `Keys()`, `KeysOf(player)`, `Pads()`, `Connected(player)`, `Buttons` with `Update`, `UpdateFor(player)`, `Held`, `Pressed` |
 | System | `Frame()`, `Seed()`, `SaveRAM()`, `SaveRestored()`, `RequestSave()`, `Trace(msg)` |
 
 Slices returned by the accessors point straight at hardware memory; writing
@@ -136,3 +137,26 @@ In `Mode1` BG2, and in `Mode2` BG2 and BG3, are affine: a byte map from
 `SetBGAffine(2, wasmad.RotateScaleFixed(angle, 256, 256), tx, ty, 120, 80)`
 rotates the map around texture pixel (tx, ty), shown at the screen centre
 (SPEC.md §8.4).
+
+## Multiplayer
+
+Up to four players (SPEC.md §5). `Keys()` is player 1; `KeysOf(2)` to
+`KeysOf(4)` read the others, and `Connected(p)` says whether player p has a
+controller, so players can join mid-game. Keep a `Buttons` per player and call
+`UpdateFor(p)`.
+
+## Icons
+
+A cart can carry a 32×32 icon that hosts show next to its title (SPEC.md
+§2.5). Draw it as a PNG with at most 15 colors plus transparency, then:
+
+```sh
+node path/to/wasm-ad/tools/wasmad.mjs icon cart.wasm icon.png
+```
+
+## Replays and save states
+
+Hosts can record replays and save states of any cart (FORMATS.md);
+`tools/wasmad.mjs run` has `--record`, `--replay`, `--state` and
+`--save-state`. Nothing in the cart needs to change, as long as its state
+lives in package variables (above).
